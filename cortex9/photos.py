@@ -850,7 +850,7 @@ def render(pid, var_idx, kind, fmt, out: Path):
     script = work / f"fotos_{fmt.replace(':', 'x')}_{kind}_v{var_idx}.filtergraph"
     script.write_text(";\n".join(filt))
     out.parent.mkdir(parents=True, exist_ok=True)
-    common = [*inputs, "-filter_complex_script", str(script), "-map", vcur, *(["-map", acur] if acur else []),
+    common = [*inputs, *ff.filter_script_args(script), "-map", vcur, *(["-map", acur] if acur else []),
               "-t", f"{total:.3f}", "-r", str(FPS), "-pix_fmt", "yuv420p", *(ff.audio_args(kind) if acur else []), "-movflags", "+faststart"]
     # limite de tempo: um render travado vira erro explicado no Log em vez de "Gerando prévias" para sempre
     limit = max(600, total * (20 if kind == "preview" else 60) * max(1, len(plan["cenas"]) / 20))
@@ -858,10 +858,10 @@ def render(pid, var_idx, kind, fmt, out: Path):
     eventlog.info(f"Renderizando {W}x{H}, {n} cenas, {fmt_t(total)}" + (" com trilha" if acur else " sem trilha"), kind="fotos", ref=pid, step=step)
     try:
         ff.run([*common, *ff.video_args(kind), str(out)], step=step, timeout=limit)
-    except Exception:  # noqa: BLE001
-        if not ff.hw_available():
+    except Exception as e:  # noqa: BLE001
+        if not ff.hw_available() or "Unrecognized option" in str(getattr(e, "detail", "")) or "No such filter" in str(getattr(e, "detail", "")):
             raise
-        eventlog.warn("Encoder de hardware (VideoToolbox) falhou: tentando de novo com encoder de software.", kind="fotos", ref=pid, step=step)
+        eventlog.warn("O render com VideoToolbox falhou: tentando de novo com encoder de software.", kind="fotos", ref=pid, step=step)
         ff.run([*common, *ff.video_args(kind, force_software=True), str(out)], step=step, timeout=limit * 2)
     return {"path": str(out), "duration": total}
 

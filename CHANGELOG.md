@@ -1,5 +1,11 @@
 # Histórico de versões do CorteX9
 
+## 2.3.1 — Compatível com FFmpeg 9 · 21/11/2026
+
+### Corrigido
+- **Prévias falhando com "Unrecognized option 'filter_complex_script'"** (achado pela aba Log): o FFmpeg 9 removeu essa opção. O CorteX9 agora detecta a versão e usa `-/filter_complex` no FFmpeg 7 ou mais novo (e a forma antiga só nas versões anteriores). Vale para o vídeo de fotos e para os cortes de episódio.
+- Esse tipo de erro agora é explicado como "O FFmpeg instalado não tem um recurso que o CorteX9 usa", e o app não tenta de novo com o encoder de software à toa.
+
 ## 2.3.0 — Aba Log, sem Magnific e destino do vídeo · 21/11/2026
 
 ### Novo

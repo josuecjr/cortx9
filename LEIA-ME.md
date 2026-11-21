@@ -1,8 +1,8 @@
-# CorteX9 2.3.0 — instalar e testar
+# CorteX9 2.3.1 — instalar e testar
 
 ## 1. Instalar (uma vez)
 
-1. Descompacte `CorteX9-2.3.0-mac.zip`.
+1. Descompacte `CorteX9-2.3.1-mac.zip`.
 2. Clique com o **botão direito** em `Instalar CorteX9.command` → **Abrir** → **Abrir**.
    (O macOS bloqueia o duplo clique em scripts baixados. Se ainda bloquear: Ajustes do Sistema → Privacidade e Segurança → "Abrir Mesmo Assim".)
 3. O Terminal instala Homebrew (se faltar), FFmpeg, Python, Whisper MLX e o modelo (~1,6 GB). Na primeira vez leva de 5 a 15 min.

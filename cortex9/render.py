@@ -371,7 +371,7 @@ def build_and_run(job):
     script.write_text(graph)
     out = Path(job["out"])
     out.parent.mkdir(parents=True, exist_ok=True)
-    common = [*inputs, "-filter_complex_script", str(script), "-map", vcur, "-map", acur, "-t", f"{total + 0.05:.3f}",
+    common = [*inputs, *ff.filter_script_args(script), "-map", vcur, "-map", acur, "-t", f"{total + 0.05:.3f}",
               "-pix_fmt", "yuv420p", *ff.audio_args(kind), "-movflags", "+faststart"]
     try:
         ff.run([*common, *ff.video_args(kind), str(out)], step=f"render {kind}")

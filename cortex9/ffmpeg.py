@@ -92,6 +92,25 @@ def encoders():
 
 
 @functools.lru_cache
+def version_major():
+    """Versão principal do FFmpeg (ex.: 9). Compilações de desenvolvimento ("N-…") contam como novas."""
+    import re
+    p = subprocess.run([FFMPEG(), "-hide_banner", "-version"], capture_output=True, text=True)
+    m = re.search(r"ffmpeg version n?(\d+)\.", p.stdout)
+    if m:
+        return int(m.group(1))
+    return 99 if "ffmpeg version N-" in p.stdout else 6
+
+
+def filter_script_args(path):
+    """Passa o filtergraph de um arquivo. O FFmpeg 7 trocou -filter_complex_script por -/filter_complex
+    e versões recentes (8/9) não aceitam mais a forma antiga."""
+    if version_major() >= 7:
+        return ["-/filter_complex", str(path)]
+    return ["-filter_complex_script", str(path)]
+
+
+@functools.lru_cache
 def filters():
     p = subprocess.run([FFMPEG(), "-hide_banner", "-filters"], capture_output=True, text=True)
     names = set()

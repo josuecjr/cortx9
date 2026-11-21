@@ -12,7 +12,7 @@ class StepError(Exception):
 
 
 _RULES = [
-    (r"No such filter|Filter not found|Unknown encoder|Encoder not found",
+    (r"No such filter|Filter not found|Unknown encoder|Encoder not found|Unrecognized option|Option not found",
      "O FFmpeg instalado não tem um recurso que o CorteX9 usa.",
      "Rode o instalador novo do CorteX9 (ele instala o FFmpeg completo). Veja o comando e o recurso que faltou na aba Log."),
     (r"travou e foi interrompido|passou de .* s e foi interrompido", "O render travou e foi interrompido.",
