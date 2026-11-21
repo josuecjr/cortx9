@@ -83,8 +83,8 @@ cat > "$BUNDLE/Contents/Info.plist" <<PL
   <key>CFBundleName</key><string>CorteX9</string>
   <key>CFBundleDisplayName</key><string>CorteX9</string>
   <key>CFBundleIdentifier</key><string>app.cortex9.mac</string>
-  <key>CFBundleVersion</key><string>2.3.1</string>
-  <key>CFBundleShortVersionString</key><string>2.3.1</string>
+  <key>CFBundleVersion</key><string>2.4.0</string>
+  <key>CFBundleShortVersionString</key><string>2.4.0</string>
   <key>CFBundleExecutable</key><string>CorteX9</string>
   <key>CFBundleIconFile</key><string>CorteX9</string>
   <key>CFBundlePackageType</key><string>APPL</string>

@@ -121,3 +121,8 @@ th{color:var(--mute);font-weight:500}
 .badtxt{color:var(--bad);font-weight:600}
 .dest{border-top:1px solid var(--line);padding-top:12px;margin-top:4px}
 code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+.sthumbs{display:grid;gap:2px;width:72px;height:72px;flex:none;border-radius:6px;overflow:hidden}
+.sthumbs img{width:100%;height:100%;object-fit:cover;border-radius:0}
+.scene .sthumbs img{width:100%;height:100%}
+.sthumbs.n1{grid-template-columns:1fr}.sthumbs.n2{grid-template-columns:1fr 1fr}.sthumbs.n3{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}.sthumbs.n3 img:first-child{grid-row:span 2}.sthumbs.n4{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.pill.lay{color:var(--acc);border-color:rgba(255,176,32,.4);padding:0 6px;font-size:10.5px}

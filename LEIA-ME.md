@@ -1,8 +1,8 @@
-# CorteX9 2.3.1 — instalar e testar
+# CorteX9 2.4.0 — instalar e testar
 
 ## 1. Instalar (uma vez)
 
-1. Descompacte `CorteX9-2.3.1-mac.zip`.
+1. Descompacte `CorteX9-2.4.0-mac.zip`.
 2. Clique com o **botão direito** em `Instalar CorteX9.command` → **Abrir** → **Abrir**.
    (O macOS bloqueia o duplo clique em scripts baixados. Se ainda bloquear: Ajustes do Sistema → Privacidade e Segurança → "Abrir Mesmo Assim".)
 3. O Terminal instala Homebrew (se faltar), FFmpeg, Python, Whisper MLX e o modelo (~1,6 GB). Na primeira vez leva de 5 a 15 min.
@@ -68,6 +68,10 @@ Na tela **Fila**, clique em **Gerar episódio de teste**. O app cria um vídeo d
 Fotos repetidas (mesmo nome, cópias "(1)", versão do WhatsApp, HEIC + JPG, foto girada) são removidas automaticamente — fica só a melhor. Cada foto recebe ajuste automático de cor, exposição, ruído e nitidez; o **Roteiro** mostra o que foi feito em cada uma.
 
 Atalho: arraste uma **pasta de fotos** (com o MP3 dentro) para `~/Movies/CorteX9/Entrada`. O vídeo começa sozinho.
+
+## Projetos antigos (antes da 2.4.0)
+
+Os vídeos planejados antes desta versão mostram uma foto por vez. Abra o projeto e clique **Refazer roteiro** para a IA remontar com cenas de várias fotos.
 
 ## Quando algo der errado: aba Log
 

@@ -15,7 +15,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import db, director, eventlog, luts, notify, paths, services, style
+from . import db, director, eventlog, luts, notify, paths, scenes, services, style
 from . import ffmpeg as ff
 from .errors import StepError, explain
 
@@ -452,7 +452,9 @@ PLANO_FOTOS = _obj({
     "efeitos": {"type": "array", "items": {"type": "string", "enum": EFEITOS_F}},
     "justificativa": _s,
     "cenas": {"type": "array", "items": _obj({
-        "foto": {"type": "integer"}, "batidas": {"type": "integer"},
+        "ato": {"type": "string", "enum": ["abertura", "apresentacao", "desenvolvimento", "climax", "final"]},
+        "layout": {"type": "string", "enum": list(scenes.LAYOUTS)},
+        "fotos": {"type": "array", "items": {"type": "integer"}}, "batidas": {"type": "integer"},
         "movimento": {"type": "string", "enum": MOVIMENTOS}, "foco_x": _n, "foco_y": _n,
         "transicao": {"type": "string", "enum": TRANSICOES},
         "texto": _s, "estilo_texto": {"type": "string", "enum": TEXTO_ESTILOS + ["nenhum"]},
@@ -463,19 +465,34 @@ PLANO_FOTOS = _obj({
         "efeitos": {"type": "array", "items": {"type": "string", "enum": EFEITOS_F}}, "justificativa": _s})},
 })
 
-SYSTEM_FOTOS = """Você é a diretora de edição do CorteX9 e vai transformar uma pasta de fotos num vídeo completo, cinematográfico, sincronizado com a trilha. Não é um slideshow: cada foto tem movimento de câmera pensado, as trocas caem nas batidas, a energia das transições acompanha a música e há textos animados e motion graphics na medida certa.
+SYSTEM_FOTOS = """Você é a diretora de edição do CorteX9. Sua tarefa é transformar uma pasta de fotos num vídeo EMOCIONANTE, sincronizado com a trilha, com cara de filme de evento ou de marca. NÃO é um slideshow: um slideshow mostra uma foto por vez, na ordem dos arquivos, com o mesmo ritmo do começo ao fim. Você vai contar uma história em atos, montar cenas com várias fotos e fazer a energia subir e descer com a música.
 
-Regras:
-- "cenas" define a ordem do vídeo. "foto" é o índice da foto (número mostrado antes de cada imagem). Use cada foto no máximo uma vez; pode descartar fotos repetidas, tremidas ou fracas.
-- "batidas": quantas batidas da trilha a foto fica na tela (normalmente 2 a 8). Partes calmas pedem fotos mais longas e transições suaves; partes intensas e picos pedem trocas rápidas (1-2 batidas), cortes secos e transições com energia. A soma das batidas deve cobrir a duração alvo informada.
-- Abra com uma foto forte (de preferência paisagem ou foto de grupo) e feche com uma foto que encerre a história. Conte uma história: ordem cronológica quando houver datas, agrupando momentos parecidos.
-- "movimento": zoom_in, zoom_out, pan_esquerda/direita/cima/baixo ou deriva. "foco_x"/"foco_y" (0 a 1) é o ponto de interesse (rosto principal, assunto) para o enquadramento e o zoom.
-- "transicao" é a transição DE ENTRADA da foto (a primeira cena ignora). Varie, mas com coerência de estilo.
-- "texto": use pouco. Título na primeira cena (estilo "titulo"), algumas frases curtas ("legenda" ou "destaque") em momentos-chave, "lower_third" para nome de lugar/pessoa/data. Deixe "" e "nenhum" nas outras.
-- "titulo"/"subtitulo": se o usuário não deu, crie a partir do que você vê. "texto_final": frase curta de encerramento.
-- "lut": escolha pelo clima das fotos e da música (epico, intimista, noir, sonho, saturado, dessaturado).
-- "variacoes": 2 variações com estilos diferentes (ex.: cinematográfica suave vs. dinâmica com cortes). A primeira é a versão principal, com "transicao_padrao": "do_plano". Pelo menos uma usa outra LUT.
-- "justificativa": 2 frases explicando a narrativa e o ritmo escolhidos (o usuário vai ler).
+## Como pensar
+1. Olhe todas as fotos e descubra a HISTÓRIA: quem são as pessoas, onde é, o que acontece, quais são os momentos fortes (abraços, risadas, palco, produto, grupo, detalhe bonito, surpresa).
+2. Agrupe fotos do MESMO momento (mesma situação, mesmas pessoas, mesmo lugar) em uma cena com várias fotos. Fotos parecidas viram dupla, trio, grade ou colagem, e não cenas separadas.
+3. Monte a ordem pela NARRATIVA, não pela ordem dos arquivos nem só pela data: abertura de impacto → apresentação (lugar, pessoas) → desenvolvimento (momentos, variedade) → CLÍMAX no pico da trilha → final emocionante.
+4. Use a energia da trilha ("energia_meio_segundo" e "picos"): partes calmas pedem cenas mais longas, como a única foto heroica com movimento lento ou a dupla; crescendo pede trio, grade e colagem com fotos entrando na batida; picos pedem RAJADA de cortes rápidos.
+
+## Layouts ("layout" + "fotos" = índices das fotos, na ordem em que entram)
+- "unica" (1 foto): a foto heroica em tela cheia com movimento de câmera. Use nas fotos mais fortes: abertura, momento-chave e final. No máximo 40% das cenas.
+- "dupla" (2 fotos): lado a lado, entram de lados opostos. Ótimo para duas fotos verticais, antes/depois ou duas reações ao mesmo momento.
+- "trio" (3 fotos): uma grande e duas menores, entrando uma por batida. Uma foto principal e dois detalhes do mesmo momento.
+- "grade" (4 fotos): grade 2×2 com as fotos surgindo uma por batida. Para equipe, participantes, produtos ou "muita coisa aconteceu".
+- "colagem" (3 a 5 fotos): fotos impressas com borda branca caindo uma por batida sobre a mesa. Clima afetivo e nostálgico, bastidores e confraternização.
+- "rajada" (3 a 6 fotos): cortes rápidos, um por batida, com punch-in e flash. Para os PICOS da música e o clímax.
+Pelo menos metade das fotos usadas deve estar em cenas com 2 ou mais fotos. Varie os layouts e não repita o mesmo layout três vezes seguidas.
+
+## Outras regras
+- Use cada foto no máximo uma vez. Descarte fotos tremidas, fracas ou quase iguais.
+- "batidas": quanto tempo a cena dura, em batidas. Referência: unica 4 a 8; dupla 5 a 7; trio 6 a 8; grade 7 a 9; colagem igual ao número de fotos + 4; rajada igual ao número de fotos (1 batida por foto). A soma deve cobrir a duração alvo. Faça uma rajada cair exatamente no maior pico.
+- "movimento" e "foco_x"/"foco_y" (0 a 1): câmera e ponto de interesse da cena (rosto principal, assunto). Valem principalmente para "unica".
+- "transicao": transição DE ENTRADA da cena (a primeira cena ignora). Calmo: fade, dissolve, smooth*. Energia: corte_seco, zoomin, slide*, fadewhite. Antes e depois da rajada, prefira corte_seco.
+- "texto": pouco e forte. Título na primeira cena (estilo "titulo"), "lower_third" para lugar, data ou nome, e 2 ou 3 frases curtas de emoção ("destaque" ou "legenda") nos momentos-chave. Nas outras cenas, "" e "nenhum".
+- "ato": a qual ato a cena pertence.
+- "titulo"/"subtitulo": se o usuário não deu, crie a partir do que você vê. "texto_final": frase curta que emocione.
+- "lut": pelo clima das fotos e da música (epico, intimista, noir, sonho, saturado, dessaturado).
+- "variacoes": 2 variações. A primeira, principal, usa "transicao_padrao": "do_plano" e "intensidade_movimento" 1.0. A segunda é mais enérgica (intensidade 1.3 a 1.5, outra LUT, "flash_batida").
+- "justificativa": 2 frases para o usuário, sobre a história e o ritmo escolhidos.
 """
 
 
@@ -484,13 +501,14 @@ def _ai_plan(pid, infos, music, opts, preset, preset_id, target):
     for f in infos:
         qual = "; tremida/borrada" if (f.get("qualidade") or {}).get("borrada") else ""
         qual += "; baixa resolução" if min(f["w"], f["h"]) < 900 else ""
-        content.append({"type": "text", "text": f"Foto {f['i']} — {f['nome']} ({f['w']}x{f['h']}{', ' + f['data'] if f['data'] else ''}{qual})"})
+        ori = "vertical" if f["h"] > f["w"] * 1.1 else ("horizontal" if f["w"] > f["h"] * 1.1 else "quadrada")
+        content.append({"type": "text", "text": f"Foto {f['i']} — {f['nome']} ({f['w']}x{f['h']}, {ori}{', ' + f['data'] if f['data'] else ''}{qual})"})
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                                    "data": base64.standard_b64encode(Path(f["thumb"]).read_bytes()).decode()}})
     beat_len = 60 / music["bpm"] if music else 0.5
     content.append({"type": "text", "text": json.dumps({
         "pedido_do_usuario": {k: opts.get(k) for k in ("titulo", "subtitulo", "estilo", "contexto")},
-        "formato": opts["formatos"][0], "duracao_alvo_s": round(target, 1),
+        "formato": opts["formatos"][0], "duracao_alvo_s": round(target, 1), "total_fotos": len(infos),
         "trilha": {"bpm": music["bpm"], "duracao_batida_s": round(beat_len, 3), "total_batidas_no_alvo": int(target / beat_len),
                    "energia_meio_segundo": music["energia_meio_segundo"][: int(target * 2) + 1], "picos": music["picos"]} if music else None,
         "kit_cliente": {k: preset.get(k) for k in ("cliente", "projeto", "contexto")},
@@ -505,49 +523,131 @@ def _ai_plan(pid, infos, music, opts, preset, preset_id, target):
     return None, None, errs
 
 
+def _similar(a, b):
+    """Mesmo momento? (fotos tiradas perto no tempo ou com cores parecidas)."""
+    da, db_ = a.get("data"), b.get("data")
+    if da and db_ and da[:13] == db_[:13]:  # mesma hora
+        try:
+            from datetime import datetime
+            fa, fb = (datetime.strptime(x[:19], "%Y:%m:%d %H:%M:%S") for x in (da, db_))
+            if abs((fa - fb).total_seconds()) < 240:
+                return True
+        except ValueError:
+            pass
+    ca, cb = a.get("cores", [[0] * 48])[0], b.get("cores", [[0] * 48])[0]
+    return sum(abs(x - y) for x, y in zip(ca, cb)) / 48 < 38
+
+
 def _local_plan(infos, music, opts, target):
-    """Sem IA: ordem cronológica, ritmo pela energia da música, movimentos e transições alternados."""
+    """Sem IA: agrupa fotos do mesmo momento em cenas, varia os layouts e põe rajada no pico da trilha."""
     rnd = random.Random(len(infos))
     order = sorted(infos, key=lambda f: (f["data"] or "9999", f["nome"].lower()))
+    sharp = sorted(order, key=lambda f: (-(f["w"] >= f["h"]), -f["nitidez"]))
+    hero_open = sharp[0]
+    hero_end = next((f for f in sharp[1:] if f is not hero_open), None) if len(order) > 4 else None
+    rest = [f for f in order if f is not hero_open and f is not hero_end]
+    # grupos de fotos do mesmo momento (perto no tempo ou com cores parecidas)
+    gid, g = [], 0
+    for k, f in enumerate(rest):
+        if k and not _similar(rest[k - 1], f):
+            g += 1
+        gid.append(g)
     beat = 60 / music["bpm"] if music else 0.5
-    per = max(2, min(8, round(target / beat / max(1, len(order)))))
+    energy = (music or {}).get("energia_meio_segundo") or [0.5]
+    picos = (music or {}).get("picos") or [target * 0.7]
+    peak_t = max(picos, key=lambda x: energy[min(len(energy) - 1, int(x * 2))])
     estilo = opts.get("estilo", "auto")
-    soft = ["fade", "dissolve", "smoothleft", "smoothright", "fadeblack", "hblur"]
-    hard = ["corte_seco", "zoomin", "slideleft", "slideright", "circleopen", "fadewhite"]
-    cenas = []
-    for k, f in enumerate(order):
-        t_here = k * per * beat
-        e = music["energia_meio_segundo"][min(len(music["energia_meio_segundo"]) - 1, int(t_here * 2))] if music else 0.5
-        b = per if e < 0.6 else max(2, per // 2)
-        if estilo == "dinamico":
-            b = max(1, b // 2)
-        mov = MOVIMENTOS[k % 6] if f["w"] >= f["h"] else ["zoom_in", "pan_cima", "zoom_out", "pan_baixo"][k % 4]
-        trans = rnd.choice(hard if (e >= 0.6 or estilo == "dinamico") else soft)
-        cenas.append({"foto": f["i"], "batidas": b, "movimento": mov, "foco_x": 0.5, "foco_y": 0.42, "transicao": trans,
-                      "texto": "", "estilo_texto": "nenhum", "motivo": "ordem cronológica e ritmo pela energia da trilha"})
+    soft = ["fade", "dissolve", "smoothleft", "smoothright", "smoothup", "hblur"]
+    hard = ["corte_seco", "zoomin", "slideleft", "slideright", "fadewhite", "circleopen"]
+    cenas = [{"ato": "abertura", "layout": "unica", "fotos": [hero_open["i"]], "batidas": 6, "movimento": "zoom_out",
+              "foco_x": 0.5, "foco_y": 0.42, "transicao": "fade", "texto": "", "estilo_texto": "nenhum", "motivo": "abertura com a foto mais forte"}]
+    t = 6 * beat
+    pattern = ["dupla", "trio", "unica", "grade", "colagem", "dupla", "unica", "trio", "grade", "colagem"]
+    need = {"unica": 1, "dupla": 2, "trio": 3, "grade": 4, "colagem": 4, "rajada": 5}
+    pos, step, last, rajada_done = 0, 0, "unica", False
+    while pos < len(rest):
+        left = len(rest) - pos
+        glen = 1
+        while pos + glen < len(rest) and gid[pos + glen] == gid[pos] and glen < 5:
+            glen += 1
+        e = energy[min(len(energy) - 1, int(t * 2))]
+        if not rajada_done and left >= 4 and t >= peak_t - 5 * beat:
+            lay, rajada_done, motivo = "rajada", True, "rajada de cortes no pico da trilha"
+        elif 2 <= glen <= 5:
+            lay = {2: "dupla", 3: "trio" if last != "trio" else "colagem", 4: "grade" if last != "grade" else "colagem", 5: "colagem"}[glen]
+            motivo = "fotos do mesmo momento juntas"
+        else:
+            lay = pattern[step % len(pattern)]
+            if lay == last:
+                lay = pattern[(step + 1) % len(pattern)]
+            step += 1
+            motivo = "variação de ritmo"
+        n = min(need[lay] if lay not in ("dupla", "trio", "grade", "colagem") or glen < 2 else min(glen, scenes.LAYOUTS[lay][1]), left)
+        if lay == "colagem" and n < 3 or lay == "rajada" and n < 3:
+            lay = scenes.layout_for_count(n)
+        lay = lay if n >= scenes.LAYOUTS[lay][0] else scenes.layout_for_count(n)
+        grp = rest[pos:pos + n]
+        pos += n
+        b = {"unica": 5, "dupla": 6, "trio": 7, "grade": 8, "colagem": n + 4, "rajada": n}[lay]
+        if estilo == "dinamico" or e > 0.75:
+            b = max(scenes.MIN_BEATS[lay], int(b * 0.75))
+        f0 = grp[0]
+        mov = rnd.choice(["zoom_in", "zoom_out", "deriva"]) if f0["w"] < f0["h"] else rnd.choice(MOVIMENTOS)
+        trans = "corte_seco" if lay == "rajada" or last == "rajada" else rnd.choice(hard if (e >= 0.6 or estilo == "dinamico") else soft)
+        cenas.append({"ato": "climax" if lay == "rajada" else "desenvolvimento", "layout": lay, "fotos": [f["i"] for f in grp], "batidas": b,
+                      "movimento": mov, "foco_x": 0.5, "foco_y": 0.42, "transicao": trans, "texto": "", "estilo_texto": "nenhum", "motivo": motivo})
+        t += b * beat
+        last = lay
+    if hero_end:
+        cenas.append({"ato": "final", "layout": "unica", "fotos": [hero_end["i"]], "batidas": 8, "movimento": "zoom_in", "foco_x": 0.5,
+                      "foco_y": 0.42, "transicao": "fadeblack" if last != "rajada" else "fadewhite", "texto": "", "estilo_texto": "nenhum",
+                      "motivo": "final com foto forte e movimento lento"})
     title = opts.get("titulo") or Path(infos[0]["arquivo"]).parent.name.replace("_", " ")
-    cenas[0].update(texto=title, estilo_texto="titulo", movimento="zoom_out", batidas=max(cenas[0]["batidas"], 4))
+    cenas[0].update(texto=title, estilo_texto="titulo")
+    if len(cenas) > 2 and opts.get("subtitulo"):
+        cenas[1].update(texto=opts["subtitulo"], estilo_texto="lower_third")
     return {"titulo": title, "subtitulo": opts.get("subtitulo", ""), "texto_final": opts.get("subtitulo") or "",
             "lut": "intimista" if estilo in ("elegante", "emocionante") else "epico", "efeitos": ["vinheta"],
-            "justificativa": "Plano local: fotos em ordem cronológica, trocas mais rápidas nas partes intensas da trilha.",
+            "justificativa": "Plano local: fotos do mesmo momento agrupadas em cenas (dupla, trio, grade, colagem), rajada no pico da trilha e abertura/final com as fotos mais fortes.",
             "cenas": cenas, "variacoes": []}
+
+
+def scenes_movs():
+    return MOVIMENTOS
 
 
 def sanitize(plan, infos, music, opts):
     valid = {f["i"] for f in infos}
     seen, cenas = set(), []
     for c in plan.get("cenas", []):
-        if c.get("foto") in valid and c["foto"] not in seen:
-            seen.add(c["foto"])
-            c["batidas"] = int(max(1, min(16, c.get("batidas") or 4)))
-            c["movimento"] = c.get("movimento") if c.get("movimento") in MOVIMENTOS else "zoom_in"
-            c["transicao"] = c.get("transicao") if c.get("transicao") in TRANSICOES else "fade"
-            c["foco_x"] = min(1, max(0, float(c.get("foco_x", 0.5))))
-            c["foco_y"] = min(1, max(0, float(c.get("foco_y", 0.45))))
-            if c.get("estilo_texto") not in TEXTO_ESTILOS:
-                c["estilo_texto"], c["texto"] = "nenhum", ""
-            cenas.append(c)
-    if len(cenas) < 2:
+        fotos = c.get("fotos")
+        if not isinstance(fotos, list) or not fotos:
+            fotos = [c.get("foto")] if c.get("foto") is not None else []   # planos antigos: uma foto por cena
+        fotos = [f for f in dict.fromkeys(fotos) if f in valid and f not in seen]
+        if not fotos:
+            continue
+        lay = c.get("layout") if c.get("layout") in scenes.LAYOUTS else scenes.layout_for_count(len(fotos))
+        lo, hi = scenes.LAYOUTS[lay]
+        if len(fotos) < lo:
+            lay = scenes.layout_for_count(len(fotos))
+            lo, hi = scenes.LAYOUTS[lay]
+        fotos = fotos[:hi]
+        seen.update(fotos)
+        c["fotos"], c["foto"], c["layout"] = fotos, fotos[0], lay
+        b = int(max(1, min(24, c.get("batidas") or 4)))
+        if lay == "rajada":
+            b = max(b, len(fotos))
+        c["batidas"] = max(b, scenes.MIN_BEATS[lay])
+        c["movimento"] = c.get("movimento") if c.get("movimento") in MOVIMENTOS else "zoom_in"
+        c["transicao"] = c.get("transicao") if c.get("transicao") in TRANSICOES else "fade"
+        c["foco_x"] = min(1, max(0, float(c.get("foco_x", 0.5) or 0.5)))
+        c["foco_y"] = min(1, max(0, float(c.get("foco_y", 0.45) or 0.45)))
+        if c.get("estilo_texto") not in TEXTO_ESTILOS:
+            c["estilo_texto"], c["texto"] = "nenhum", ""
+        cenas.append(c)
+    if sum(len(c["fotos"]) for c in cenas) < 2:
+        cenas = []
+    if not cenas:
         raise StepError("plano das fotos", "O plano não usou fotos suficientes.", "Clique em Tentar de novo.")
     plan["cenas"] = cenas
     plan["lut"] = plan.get("lut") if plan.get("lut") in luts.LUTS else "epico"
@@ -651,7 +751,7 @@ def analyze(pid):
         music = analyze_music(mpath)
     else:
         _warn(pid, "Sem trilha: o vídeo sai com ritmo fixo e sem música. Escolha uma trilha e peça um ajuste.")
-    per_photo = 3.2 if opts["estilo"] != "dinamico" else 2.0
+    per_photo = 2.6 if opts["estilo"] != "dinamico" else 1.8   # várias fotos por cena: menos tempo por foto
     natural = len(infos) * per_photo + 2
     target = float(opts.get("duracao") or 0) or (min(music["duracao"], max(natural, 15)) if music else natural)
     _stage(pid, "IA diretora montando o vídeo", 0.4)
@@ -667,7 +767,7 @@ def analyze(pid):
                   detail=json.dumps({k: v for k, v in plan.items() if k != "_tempos"}, ensure_ascii=False, indent=1)[:15000])
     meta = (get(pid)["meta"] or {})
     meta.update(motor=engine, fotos=infos, duplicadas=dups, trilha=str(mpath) if mpath else None,
-                musica={k: music[k] for k in ("duracao", "bpm", "picos")} if music else None)
+                musica={k: music[k] for k in ("duracao", "bpm", "picos", "batidas")} if music else None)
     _set(pid, plan=plan, meta=meta, variations=[{"idx": i + 1, "spec": v, "status": "na_fila"} for i, v in enumerate(plan["variacoes"])])
     from . import jobs
     for i in range(len(plan["variacoes"])):
@@ -778,7 +878,6 @@ def render(pid, var_idx, kind, fmt, out: Path):
     work = Path(p["work_dir"])
     platedir = work / f"placas_{fmt.replace(':', 'x')}_{kind}"
     platedir.mkdir(parents=True, exist_ok=True)
-    scale = 2.0 if kind == "final" else 1.25
     inten = v.get("intensidade_movimento", 1.0)
     inputs, filt = [], []
     n = len(plan["cenas"])
@@ -791,16 +890,30 @@ def render(pid, var_idx, kind, fmt, out: Path):
         slot = bounds[k + 1] - bounds[k]
         td = 0 if k + 1 >= n else _tdur(trans[k + 1], bounds[k + 2] - bounds[k + 1] if k + 2 <= n else 1, slot)
         durs.append((slot + td, td))
+    # cenas desenhadas quadro a quadro (movimento subpixel, várias fotos por cena), em paralelo
+    beats = _beats_of(meta, plan)
+    pulse = inten >= 1.2 or "flash_batida" in (v.get("efeitos") or [])
+    clipdir = work / f"cenas_{fmt.replace(':', 'x')}_{kind}"
+    clipdir.mkdir(parents=True, exist_ok=True)
+    sjobs = []
     for k, c in enumerate(plan["cenas"]):
-        plate = platedir / f"p{c['foto']:03d}_{int(c['foco_x'] * 100)}_{int(c['foco_y'] * 100)}.jpg"
-        if not plate.exists():
-            make_plate(infos[c["foto"]], plate, W, H, scale, (c["foco_x"], c["foco_y"]))
         d, _td = durs[k]
-        frames = int(math.ceil(d * FPS)) + 1
-        inputs += ["-i", str(plate)]  # 1 quadro só: o zoompan gera os quadros (decodifica a foto uma vez)
-        z, e = _zoompan(c["movimento"], frames, W, H, inten)
-        x, y = _xy(c["movimento"], e, c["foco_x"], c["foco_y"])
-        filt.append(f"[{k}:v]zoompan=z='{z}':x='{x}':y='{y}':d={frames}:s={W}x{H}:fps={FPS},trim=duration={d:.3f},setpts=PTS-STARTPTS,format=yuv420p,setsar=1[c{k}]")
+        if not c.get("fotos"):  # plano da versão antiga: uma foto por cena
+            c["fotos"], c["layout"] = [c["foto"]], "unica"
+        c.setdefault("layout", scenes.layout_for_count(len(c["fotos"])))
+        spec = {**{kk: c.get(kk) for kk in ("layout", "fotos", "movimento", "foco_x", "foco_y")}, "_platedir": platedir}
+        rel = [round(b - bounds[k], 3) for b in beats if bounds[k] <= b < bounds[k] + d]
+        key = scenes.scene_key(spec, W, H, d, rel, inten, pulse, kind)
+        sjobs.append({"spec": spec, "infos": [infos[i] for i in c["fotos"]], "W": W, "H": H, "dur": d, "fps": FPS, "beats": rel,
+                      "inten": inten, "pulse": pulse, "kind": kind, "ffmpeg": ff.FFMPEG(), "seed": c["fotos"][0] * 7 + k,
+                      "out": str(clipdir / f"c{k:02d}_{key}.mp4")})
+    t0 = time.time()
+    clips = _render_scenes(pid, sjobs, kind)
+    eventlog.info(f"{n} cenas desenhadas em {time.time() - t0:.0f} s ({_layout_summary(plan)})", kind="fotos", ref=pid)
+    for k, clip in enumerate(clips):
+        d, _td = durs[k]
+        inputs += ["-i", clip]
+        filt.append(f"[{k}:v]trim=duration={d:.3f},setpts=PTS-STARTPTS,fps={FPS},format=yuv420p,setsar=1[c{k}]")
     cur = "[c0]"
     for k in range(1, n):
         td = durs[k - 1][1]
@@ -864,6 +977,38 @@ def render(pid, var_idx, kind, fmt, out: Path):
         eventlog.warn("O render com VideoToolbox falhou: tentando de novo com encoder de software.", kind="fotos", ref=pid, step=step)
         ff.run([*common, *ff.video_args(kind, force_software=True), str(out)], step=step, timeout=limit * 2)
     return {"path": str(out), "duration": total}
+
+
+def _beats_of(meta, plan):
+    m = meta.get("musica") or {}
+    if m.get("batidas"):
+        return m["batidas"]
+    bpm = m.get("bpm") or 120
+    total = (plan.get("_tempos") or [0, 60])[-1]
+    return [round(i * 60 / bpm, 3) for i in range(int(total * bpm / 60) + 2)]
+
+
+def _layout_summary(plan):
+    from collections import Counter
+    c = Counter(x.get("layout", "unica") for x in plan["cenas"])
+    return ", ".join(f"{n}× {k}" for k, n in c.most_common())
+
+
+def _render_scenes(pid, sjobs, kind):
+    import os
+    from concurrent.futures import ThreadPoolExecutor
+    ref = eventlog.current()
+
+    def one(j):
+        with eventlog.context(*ref):
+            try:
+                return scenes.render_scene(j)
+            except Exception as e:  # noqa: BLE001
+                raise StepError("cena do vídeo", f"A cena {j['spec'].get('layout')} não renderizou.",
+                                "Clique em Tentar de novo. Se repetir, mande o log.", f"{type(e).__name__}: {e}") from e
+    workers = max(1, min(4, (os.cpu_count() or 4) // 2))
+    with ThreadPoolExecutor(workers) as ex:
+        return list(ex.map(one, sjobs))
 
 
 def _tdur(t, next_slot, slot):

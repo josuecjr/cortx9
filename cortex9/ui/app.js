@@ -27,6 +27,7 @@ const STATUS = {
   gerando_previa: ["Gerando prévia", "info"], previa_pronta: ["Prévia pronta", "acc"], aprovado: ["Aprovado · na fila do final", "ok"],
   renderizando_final: ["Renderizando final", "info"], finalizado: ["Final pronto", "ok"], reprovado: ["Reprovado", "bad"], ajustando: ["Ajustando", "info"],
 };
+const LAYOUT = { unica: "única", dupla: "dupla", trio: "trio", grade: "grade", colagem: "colagem", rajada: "rajada" };
 const pill = (s) => { const [t, c] = STATUS[s] || [s, ""]; return `<span class="pill ${c}">${esc(t)}</span>`; };
 
 let view = "fila", currentEp = null, timer = null;
@@ -353,10 +354,11 @@ async function fotoDetail(id) {
   const playing = {}; document.querySelectorAll("#fdet video").forEach((v) => playing[v.dataset.i] = v.currentTime);
   $("#main").innerHTML = `<div id="fdet"><div class="row"><button class="btn sm" id="fback">← Vídeos de fotos</button></div>
     <div class="row" style="margin-top:12px"><div><h1>${esc(p.titulo_video || p.titulo)}</h1><div class="sub" style="margin:0">${pill(p.status)} &nbsp;${esc(p.etapa || "")} · ${p.fotos_total} fotos · plano: ${esc(p.motor || "—")}${p.musica ? ` · trilha ${p.musica.bpm} BPM` : ""} · custo ${usd(p.custo.total_usd)}</div></div>
-      <div class="spacer"></div><button class="btn" id="flog">Ver log</button>${p.status === "erro" || p.travado ? `<button class="btn" id="fretry">Tentar de novo</button>` : ""}</div>
+      <div class="spacer"></div>${!locked && !p.travado && !["na_fila", "processando", "gerando_previas", "ajustando"].includes(p.status) ? `<button class="btn" id="freplan2" title="Refaz o roteiro do zero com a IA diretora">Refazer roteiro</button>` : ""}<button class="btn" id="flog">Ver log</button>${p.status === "erro" || p.travado ? `<button class="btn" id="fretry">Tentar de novo</button>` : ""}</div>
     ${p.travado ? `<div class="warn">Este projeto está parado: nada está rodando para ele (o app pode ter sido fechado no meio do render). Clique em <b>Tentar de novo</b>.</div>` : ""}
     ${p.erro ? errBox(p.erro) : ""}${(p.avisos || []).map((a) => `<div class="warn">${esc(a)}</div>`).join("")}
     <div class="bar" style="margin:12px 0 18px"><i style="width:${Math.round((p.progresso || 0) * 100)}%"></i></div>
+    ${p.plano_antigo && !locked ? `<div class="warn" style="margin-bottom:12px">Este vídeo foi planejado no modo antigo (uma foto por vez). <button class="btn sm pri" id="freplan">Refazer com a nova direção</button> monta cenas com várias fotos, atos e rajada no pico da música.</div>` : ""}
     ${p.justificativa ? `<div class="card why" style="margin-bottom:16px"><b style="color:var(--text)">Por que a IA montou assim:</b> ${esc(p.justificativa)}${p.ajuste ? `<br><b style="color:var(--text)">Último ajuste:</b> ${esc(p.ajuste)}` : ""}</div>` : ""}
     <div class="fvars">${p.variacoes.map((v, i) => `<div class="cut ${i === sel ? "aprovado" : ""}">
       <div class="vid wide ${ratio}">${v.video ? `<video data-i="${i}" src="${v.video}" poster="${v.thumb || ""}" controls playsinline preload="metadata"></video>` : `<div class="ph">${v.status === "erro" ? "Esta versão falhou" : "Renderizando prévia…"}</div>`}</div>
@@ -367,11 +369,12 @@ async function fotoDetail(id) {
     ${locked ? "" : `<div class="card row" style="margin-top:16px"><input id="fadj" placeholder="Ajuste rápido: mais rápido, mais calmo, sem texto, outra LUT, título: …, duração: 60"><button class="btn" id="fadjb">Ajustar</button><button class="btn bad" id="frej">Reprovar</button></div>`}
     ${destCard(p, locked)}
     ${p.finais.length ? `<h2>Finais</h2><div class="meta">${p.finais.map((f) => `<span><a href="#" data-rev="${esc(f.arquivo)}" style="color:var(--ok)">${esc(f.formato)} · ${fmtT(f.duracao)} — abrir no Finder</a></span>`).join("")}</div>` : ""}
-    <h2>Roteiro (${p.cenas.length} cenas)</h2><div class="scenes">${p.cenas.map((c) => `<div class="scene"><img src="${c.thumb}" loading="lazy"><div><b>${c.n}</b> · ${fmtT(c.inicio)}–${fmtT(c.fim)}<br>${esc(c.movimento)} · ${esc(c.transicao)}${c.texto ? `<br><i>“${esc(c.texto)}”</i>` : ""}${(c.ajustes || []).length ? `<br><span style="color:var(--ok)">✓ ${esc(c.ajustes.join(" · "))}</span>` : ""}</div></div>`).join("")}</div>
+    <h2>Roteiro (${p.cenas.length} cenas · ${p.fotos_usadas || p.fotos_total} de ${p.fotos_total} fotos)</h2><div class="scenes">${p.cenas.map((c) => `<div class="scene"><div class="sthumbs n${Math.min(4, (c.thumbs || [c.thumb]).length)}">${(c.thumbs || [c.thumb]).slice(0, 4).map((t) => `<img src="${t}" loading="lazy">`).join("")}</div><div><b>${c.n}</b> · ${fmtT(c.inicio)}–${fmtT(c.fim)} <span class="pill lay">${esc(LAYOUT[c.layout] || c.layout)}</span>${c.ato ? ` <span class="why">${esc(c.ato)}</span>` : ""}<br>${esc(c.layout === "unica" ? c.movimento : (c.thumbs || []).length + " fotos")} · ${esc(c.transicao)}${c.texto ? `<br><i>“${esc(c.texto)}”</i>` : ""}${c.motivo ? `<br><span class="why">${esc(c.motivo)}</span>` : ""}</div></div>`).join("")}</div>
     ${(p.duplicadas || []).length ? `<h2>Fotos repetidas removidas</h2><div class="card why">${p.duplicadas.map((d) => `<div>Mantida <b style="color:var(--text)">${esc(d.mantida)}</b> — removidas: ${d.removidas.map((r) => `${esc(r.nome)} (${esc(r.motivo)})`).join(", ")}</div>`).join("")}</div>` : ""}</div>`;
   document.querySelectorAll("#fdet video").forEach((v) => { if (playing[v.dataset.i]) v.currentTime = playing[v.dataset.i]; });
   $("#fback").onclick = () => { ui.foto = null; ui.fvar = null; $("#main").innerHTML = ""; render(); };
   $("#flog").onclick = () => openLog("fotos", id);
+  ["#freplan", "#freplan2"].forEach((sel) => { if ($(sel)) $(sel).onclick = async () => { if (!confirm("Refazer o roteiro do zero? As prévias atuais serão substituídas.")) return; await call("photo_replan", { id }); toast("Refazendo o roteiro — novas prévias em alguns minutos."); ui.fsig = null; render(); }; });
   document.querySelectorAll("[data-url2]").forEach((a) => a.onclick = (e) => { e.preventDefault(); call("open_url", { url: a.dataset.url2 }); });
   if ($("#dsave")) {
     $("#dpick").onclick = async () => { const r = await call("pick", { kind: "folder" }); if (r) $("#d_saida").value = r; else toast("Cole o caminho no campo (o seletor só abre no app do Mac)."); };

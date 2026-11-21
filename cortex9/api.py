@@ -291,10 +291,15 @@ def photo_project(id):
     plan, meta = p["plan"] or {}, p["meta"] or {}
     fotos = {f["i"]: f for f in meta.get("fotos", [])}
     tempos = plan.get("_tempos") or []
-    cenas = [{"n": k + 1, "foto": fotos.get(c["foto"], {}).get("nome"), "thumb": media(fotos.get(c["foto"], {}).get("thumb")),
-              "inicio": tempos[k] if k < len(tempos) else None, "fim": tempos[k + 1] if k + 1 < len(tempos) else None,
-              "movimento": c["movimento"], "transicao": c["transicao"], "texto": c.get("texto"), "estilo_texto": c.get("estilo_texto"),
-              "motivo": c.get("motivo"), "ajustes": fotos.get(c["foto"], {}).get("ajustes", [])} for k, c in enumerate(plan.get("cenas", []))]
+    cenas = []
+    for k, c in enumerate(plan.get("cenas", [])):
+        ids = c.get("fotos") or ([c["foto"]] if c.get("foto") is not None else [])
+        fs = [fotos.get(i, {}) for i in ids]
+        cenas.append({"n": k + 1, "layout": c.get("layout", "unica"), "ato": c.get("ato"), "foto": ", ".join(f.get("nome", "?") for f in fs),
+                      "thumbs": [media(f.get("thumb")) for f in fs], "thumb": media(fs[0].get("thumb")) if fs else None,
+                      "inicio": tempos[k] if k < len(tempos) else None, "fim": tempos[k + 1] if k + 1 < len(tempos) else None,
+                      "movimento": c.get("movimento"), "transicao": c.get("transicao"), "texto": c.get("texto"), "estilo_texto": c.get("estilo_texto"),
+                      "motivo": c.get("motivo"), "ajustes": sorted({a for f in fs for a in f.get("ajustes", [])})})
     cost = services.episode_cost(-id)
     _pid, preset = pipeline.preset_of(p)
     opts = {**photos.DEFAULTS, **(p["options"] or {})}
@@ -308,7 +313,8 @@ def photo_project(id):
     return {"travado": _photo_stalled(p), "destino": destino,"id": p["id"], "titulo": p["title"], "status": p["status"], "etapa": p["stage"], "progresso": p["progress"], "pasta": p["folder"],
             "opcoes": p["options"], "erro": erro, "avisos": meta.get("avisos", []), "motor": meta.get("motor"),
             "musica": meta.get("musica"), "trilha": meta.get("trilha"), "titulo_video": plan.get("titulo"), "justificativa": plan.get("justificativa"),
-            "fotos_total": len(fotos), "cenas": cenas, "duplicadas": meta.get("duplicadas", []), "escolhida": p["chosen"], "custo": cost, "ajuste": meta.get("ajuste"),
+            "fotos_total": len(fotos), "fotos_usadas": len({i for c in plan.get("cenas", []) for i in (c.get("fotos") or [c.get("foto")])}),
+            "plano_antigo": bool(plan.get("cenas")) and not any(c.get("layout") for c in plan.get("cenas", [])), "cenas": cenas, "duplicadas": meta.get("duplicadas", []), "escolhida": p["chosen"], "custo": cost, "ajuste": meta.get("ajuste"),
             "finais": [{**f, "url": media(f["arquivo"])} for f in (p["finals"] or [])],
             "variacoes": [{**{k: v for k, v in x.items() if k not in ("video", "thumb")}, "video": media(x.get("video")), "thumb": media(x.get("thumb"))}
                           for x in (p["variations"] or [])]}
@@ -410,6 +416,23 @@ def _photo_active(id):
 
 def _photo_stalled(r):
     return r["status"] in ("na_fila", "processando", "gerando_previas", "ajustando", "renderizando_final") and not _photo_active(r["id"])
+
+
+def photo_replan(id):
+    """Refaz o plano com a direção nova (cenas com várias fotos, atos, rajada no pico) e gera novas prévias."""
+    from . import photos
+    p = photos.get(id)
+    if not p:
+        raise ValueError("Projeto não encontrado.")
+    if _photo_active(id):
+        raise ValueError("Este projeto ainda está processando. Espere terminar.")
+    meta = p["meta"] or {}
+    meta["avisos"] = []
+    db.update("photo_projects", id, meta=meta, plan=None, variations=[], chosen=None, status="na_fila", stage="Refazendo o plano", error=None,
+              previews_ready_at=None, progress=0)
+    jobs.enqueue("analise", "photo_analyze", payload={"project_id": id})
+    eventlog.info("Plano refeito com a nova direção (cenas com várias fotos).", kind="fotos", ref=id)
+    return True
 
 
 def photo_retry(id):

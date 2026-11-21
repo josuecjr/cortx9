@@ -1,5 +1,25 @@
 # Histórico de versões do CorteX9
 
+## 2.4.0 — Vídeo de fotos com cenas, não slideshow · 21/11/2026
+
+### Novo
+- **Cenas com várias fotos.** A IA diretora agora monta o vídeo em atos (abertura, apresentação, desenvolvimento, clímax e final) e agrupa fotos do mesmo momento em cenas:
+  - **única**: a foto heroica em tela cheia, com câmera;
+  - **dupla**: duas fotos lado a lado, entrando de lados opostos;
+  - **trio**: uma grande e duas menores, entrando uma por batida;
+  - **grade**: quatro fotos surgindo uma por batida;
+  - **colagem**: de 3 a 5 fotos impressas, com borda, caindo uma por batida sobre a mesa;
+  - **rajada**: de 3 a 6 fotos em cortes rápidos na batida, com punch-in e flash, nos picos da música.
+- A ordem segue a **narrativa**, não a ordem dos arquivos. A IA também evita repetir o mesmo tipo de cena e põe a rajada no maior pico da trilha.
+- **Pulso na batida** na versão dinâmica: um leve punch-in a cada batida.
+- **Refazer roteiro**: um botão no projeto refaz o plano do zero com a nova direção. Projetos planejados no modo antigo mostram um aviso com esse botão.
+- O roteiro mostra o tipo de cena, o ato e as miniaturas de todas as fotos de cada cena.
+- Sem IA na nuvem, o plano local também agrupa fotos do mesmo momento (pela hora da foto ou pelas cores) e varia os tipos de cena.
+
+### Corrigido
+- **Zoom e pan "travando"**: o filtro zoompan do FFmpeg só anda em pixels inteiros, então a imagem ficava parada alguns quadros e depois pulava. Agora cada cena é desenhada quadro a quadro com posição fracionária (subpixel). Medido num pan de 5 s: o tranco entre quadros caiu de 1,35 px para menos de 0,01 px, e os quadros parados caíram de 76 de 139 para nenhum.
+- O pan não encosta mais na borda da foto (antes ele parava no começo e no fim).
+
 ## 2.3.1 — Compatível com FFmpeg 9 · 21/11/2026
 
 ### Corrigido
