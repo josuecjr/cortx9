@@ -61,7 +61,7 @@ Na tela **Fila**, clique em **Gerar episódio de teste**. O app cria um vídeo d
 1. Menu **Vídeo de fotos** → escolha a **pasta de fotos** e a **trilha** (MP3, WAV ou M4A).
 2. Opcional: título, subtítulo, estilo (cinematográfico, dinâmico, elegante…), duração e formatos. Para 1920×1080, deixe marcado **16:9**.
 3. Em **Onde salvar o vídeo**, escolha a pasta do computador (vazio = pasta do kit) e se o final vai para o Google Drive (e em qual pasta dentro de "Meu Drive"). Dá para mudar depois, na tela do projeto, antes de aprovar.
-4. Clique **Criar vídeo**. A IA enquadra sem distorcer, ordena, sincroniza com as batidas, anima e cria os textos.
+4. Clique **Criar vídeo**. A IA monta a história em atos e agrupa fotos do mesmo momento em cenas (dupla, trio, grade, colagem e rajada no pico da música), com câmera suave, textos e transições na batida.
 5. Quando chegar a notificação, compare **V1** e **V2**, peça um ajuste se quiser (ex.: `mais rápido`, `título: Viagem à Serra`, `duração: 45`) e clique **Aprovar e renderizar**.
 6. O final vai para a pasta escolhida e, se marcado, para o Drive. A tela do projeto mostra os dois caminhos.
 
