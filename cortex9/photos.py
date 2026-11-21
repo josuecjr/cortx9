@@ -258,7 +258,13 @@ def analyze_photo(path, thumb_dir: Path, i):
     edges = t.convert("L").filter(ImageFilter.FIND_EDGES)
     sharp = ImageStat.Stat(edges).var[0]
     import hashlib
-    return {"i": i, "arquivo": str(path), "nome": Path(path).name, "w": w, "h": h, "data": _exif_date(path),
+    from . import scenes as _sc
+    tmp = {"i": i, "arquivo": str(path)}
+    try:
+        inter = _sc.interest(tmp, im)
+    except Exception:  # noqa: BLE001
+        inter = None
+    return {"interesse": inter, "i": i, "arquivo": str(path), "nome": Path(path).name, "w": w, "h": h, "data": _exif_date(path),
             "nitidez": q["nitidez"], "thumb": str(thumb), "dhash": _dhashes(t), "cores": _colors(t), "qualidade": q,
             "ajustes": ajustes_texto(q, low_res=min(w, h) < 900),
             "md5": hashlib.md5(Path(path).read_bytes()).hexdigest()}
@@ -481,6 +487,9 @@ SYSTEM_FOTOS = """Você é a diretora de edição do CorteX9. Sua tarefa é tran
 - "colagem" (3 a 5 fotos): fotos impressas com borda branca caindo uma por batida sobre a mesa. Clima afetivo e nostálgico, bastidores e confraternização.
 - "rajada" (3 a 6 fotos): cortes rápidos, um por batida, com punch-in e flash. Para os PICOS da música e o clímax.
 Pelo menos metade das fotos usadas deve estar em cenas com 2 ou mais fotos. Varie os layouts e não repita o mesmo layout três vezes seguidas.
+- NÃO coloque duas fotos quase iguais (mesmo grupo na mesma pose, mesmo enquadramento) na mesma cena: escolha a melhor e descarte a outra.
+- Fotos de "baixa resolução" ficam melhor em dupla, trio, grade ou colagem do que em "unica" de tela cheia.
+- Numa cena com várias fotos, a PRIMEIRA da lista é a principal (fica no maior painel ou por cima na colagem).
 
 ## Outras regras
 - Use cada foto no máximo uma vez. Descarte fotos tremidas, fracas ou quase iguais.
@@ -542,7 +551,7 @@ def _local_plan(infos, music, opts, target):
     """Sem IA: agrupa fotos do mesmo momento em cenas, varia os layouts e põe rajada no pico da trilha."""
     rnd = random.Random(len(infos))
     order = sorted(infos, key=lambda f: (f["data"] or "9999", f["nome"].lower()))
-    sharp = sorted(order, key=lambda f: (-(f["w"] >= f["h"]), -f["nitidez"]))
+    sharp = sorted(order, key=lambda f: (-(f["w"] >= f["h"]), -(min(f["w"], f["h"]) >= 900), -f["nitidez"]))
     hero_open = sharp[0]
     hero_end = next((f for f in sharp[1:] if f is not hero_open), None) if len(order) > 4 else None
     rest = [f for f in order if f is not hero_open and f is not hero_end]
@@ -616,14 +625,35 @@ def scenes_movs():
     return MOVIMENTOS
 
 
+def _drop_lookalikes(ids, byi, limiar=14):
+    """Na mesma cena, duas fotos quase iguais (mesmo grupo, mesma pose) ficam feias juntas: mantém a primeira."""
+    keep = []
+    for i in ids:
+        a = byi.get(i) or {}
+        dup = False
+        for j in keep:
+            b = byi.get(j) or {}
+            if a.get("dhash") and b.get("dhash"):
+                dist = min(bin(a["dhash"][0] ^ h).count("1") for h in b["dhash"])
+                cdiff = sum(abs(x - y) for x, y in zip(a["cores"][0], b["cores"][0])) / 48 if a.get("cores") and b.get("cores") else 99
+                if dist <= limiar and cdiff <= 28:
+                    dup = True
+                    break
+        if not dup:
+            keep.append(i)
+    return keep
+
+
 def sanitize(plan, infos, music, opts):
     valid = {f["i"] for f in infos}
+    byi = {f["i"]: f for f in infos}
     seen, cenas = set(), []
     for c in plan.get("cenas", []):
         fotos = c.get("fotos")
         if not isinstance(fotos, list) or not fotos:
             fotos = [c.get("foto")] if c.get("foto") is not None else []   # planos antigos: uma foto por cena
         fotos = [f for f in dict.fromkeys(fotos) if f in valid and f not in seen]
+        fotos = _drop_lookalikes(fotos, byi)
         if not fotos:
             continue
         lay = c.get("layout") if c.get("layout") in scenes.LAYOUTS else scenes.layout_for_count(len(fotos))
@@ -689,10 +719,11 @@ def timeline(plan, music, target):
         t = grid[k] if k < len(grid) else acc * beat
         if t - bounds[-1] < 0.9:  # mínimo de 0,9 s por foto
             t = bounds[-1] + 0.9
-        bounds.append(round(t, 3))
-    end = max(target or 0, bounds[-1] + 2.0)
+        bounds.append(round(float(t), 3))
+    last = plan["cenas"][-1]["batidas"] * scale * beat if plan["cenas"] else 2.0
+    end = max(target or 0, bounds[-1] + max(2.0, last))
     bounds.append(round(end, 3))
-    return bounds
+    return [float(b) for b in bounds]
 
 
 # ------------------------------------------------------------------ análise completa
@@ -822,8 +853,8 @@ def _ass(path, W, H, plan, bounds, preset, v):
              "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
              f"Style: Tit,{font},{int(96 * u)},{col},{col},&H64000000,&H00000000,-1,0,0,0,100,100,2,0,1,{max(1, int(2 * u))},{int(3 * u)},5,60,60,0,1",
              f"Style: Sub,{font},{int(40 * u)},{hi},{hi},&H64000000,&H00000000,0,0,0,0,100,100,6,0,1,{max(1, int(1 * u))},{int(2 * u)},5,60,60,0,1",
-             f"Style: Leg,{font},{int(56 * u)},{col},{col},&H78000000,&H00000000,-1,0,0,0,100,100,0,0,1,{max(1, int(3 * u))},{int(2 * u)},2,80,80,{int(110 * u)},1",
-             f"Style: Dest,{font},{int(84 * u)},{hi},{hi},&H78000000,&H00000000,-1,0,0,0,100,100,0,0,1,{max(1, int(3 * u))},{int(3 * u)},5,80,80,0,1",
+             f"Style: Leg,{font},{int(50 * u)},{col},{col},&H38000000,&H00000000,-1,0,0,0,100,100,1,0,3,{max(4, int(14 * u))},0,2,80,80,{int(110 * u)},1",
+             f"Style: Dest,{font},{int(72 * u)},{hi},{hi},&H30000000,&H00000000,-1,0,0,0,100,100,1,0,3,{max(6, int(22 * u))},0,5,80,80,0,1",
              f"Style: LT,{font},{int(40 * u)},&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,1,0,1,0,0,1,0,0,0,1",
              f"Style: Box,{font},10,{hi},{hi},&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1",
              "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"]
@@ -903,8 +934,9 @@ def render(pid, var_idx, kind, fmt, out: Path):
         c.setdefault("layout", scenes.layout_for_count(len(c["fotos"])))
         spec = {**{kk: c.get(kk) for kk in ("layout", "fotos", "movimento", "foco_x", "foco_y")}, "_platedir": platedir}
         rel = [round(b - bounds[k], 3) for b in beats if bounds[k] <= b < bounds[k] + d]
-        key = scenes.scene_key(spec, W, H, d, rel, inten, pulse, kind)
-        sjobs.append({"spec": spec, "infos": [infos[i] for i in c["fotos"]], "W": W, "H": H, "dur": d, "fps": FPS, "beats": rel,
+        key = scenes.scene_key(spec, W, H, d, rel, inten, pulse, kind, "letterbox" in (v.get("efeitos") or []) and c["layout"] in ("unica", "rajada"))
+        lb = "letterbox" in (v.get("efeitos") or []) and c["layout"] in ("unica", "rajada")
+        sjobs.append({"letterbox": lb, "spec": spec, "infos": [infos[i] for i in c["fotos"]], "W": W, "H": H, "dur": d, "fps": FPS, "beats": rel,
                       "inten": inten, "pulse": pulse, "kind": kind, "ffmpeg": ff.FFMPEG(), "seed": c["fotos"][0] * 7 + k,
                       "out": str(clipdir / f"c{k:02d}_{key}.mp4")})
     t0 = time.time()
@@ -922,17 +954,18 @@ def render(pid, var_idx, kind, fmt, out: Path):
         cur = f"[x{k}]"
     ass = work / f"textos_{fmt.replace(':', 'x')}_{kind}_v{var_idx}.ass"
     _ass(ass, W, H, plan, bounds, preset, v)
-    vf = [f"lut3d=file='{ff.esc_filter_path(luts.path_for(v['lut']))}':interp=tetrahedral"]
+    # LUT a 70%: dá o clima sem esmagar pretos nem estourar as cores
+    filt.append(f"{cur}split[lo][lb];[lb]lut3d=file='{ff.esc_filter_path(luts.path_for(v['lut']))}':interp=tetrahedral[lg];"
+                f"[lo][lg]blend=all_mode=normal:all_opacity=0.7[graded]")
+    cur = "[graded]"
+    vf = []
     ef = set(v.get("efeitos") or [])
     if "luz_quente" in ef:
         vf.append("colorbalance=rh=0.05:gh=0.02:bh=-0.04")
     if "vinheta" in ef:
-        vf.append("vignette=angle=PI/5")
-    if "granulado" in ef:
-        vf.append("noise=alls=6:allf=t")
-    if "letterbox" in ef and W > H:
-        bh = int(H * 0.1)
-        vf.append(f"drawbox=x=0:y=0:w=iw:h={bh}:color=black:t=fill,drawbox=x=0:y={H - bh}:w=iw:h={bh}:color=black:t=fill")
+        vf.append("vignette=angle=PI/7")
+    # grão de filme: leve sempre (disfarça fotos ampliadas/comprimidas), mais forte com o efeito "granulado"
+    vf.append(f"noise=alls={7 if 'granulado' in ef else 3}:allf=t")
     if "flash_batida" in ef:
         drops = [b for b in (meta.get("musica") or {}).get("picos", []) if b < total][:8]
         for b in drops:

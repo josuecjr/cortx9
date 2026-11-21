@@ -1,5 +1,22 @@
 # Histórico de versões do CorteX9
 
+## 2.5.0 — Acabamento do vídeo de fotos · 21/11/2026
+
+### Novo
+- **Recorte inteligente**: o app acha os rostos (OpenCV). Sem rostos, acha o assunto principal pelo detalhe e pela cor. Os rostos ficam no terço superior do quadro, e o zoom nunca passa do ponto em que cortaria as pessoas.
+- **Dupla, trio e grade com visual editorial**: fendas finas, cantos retos e fotos de ponta a ponta. Cada foto entra por **revelação**, uma máscara que abre pela borda com leve paralaxe, no lugar do "pop" de escala. A foto principal fica no maior painel.
+- **Colagem redesenhada**: composição fixa, com a foto principal no centro e por cima e as outras atrás. Rotações pequenas, borda fina, sombra suave e entrada deslizando e assentando, sobre um **fundo de estúdio** limpo (grafite com o tom da foto, luz no centro e vinheta).
+- **Textos em faixa**: frases de destaque e legendas ganham uma faixa escura atrás e ficam legíveis em cima de qualquer foto.
+- Foto vertical em vídeo horizontal: a foto inteira com sombra, sobre o fundo dela mesma, bem escurecido.
+
+### Mudado
+- **Letterbox** só em cenas de foto única e na rajada: as faixas pretas não cortam mais grades e colagens.
+- **LUT aplicada a 70%** e vinheta mais suave: menos preto esmagado e menos cor estourada.
+- Grão de filme leve em todo o vídeo, que disfarça fotos ampliadas ou comprimidas, como as do WhatsApp.
+- Duas fotos quase iguais (o mesmo grupo na mesma pose) não entram mais na mesma cena.
+- Fotos de baixa resolução vão de preferência para painéis e colagens, e não para a tela cheia.
+- A última cena dura o número de batidas planejado (antes podia ficar com só 2 s).
+
 ## 2.4.0 — Vídeo de fotos com cenas, não slideshow · 21/11/2026
 
 ### Novo
