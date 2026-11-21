@@ -15,7 +15,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import db, director, luts, notify, paths, services, style
+from . import db, director, eventlog, luts, notify, paths, services, style
 from . import ffmpeg as ff
 from .errors import StepError, explain
 
@@ -34,7 +34,10 @@ TEXTO_ESTILOS = ["titulo", "legenda", "destaque", "lower_third"]
 ESTILOS = ["auto", "cinematografico", "dinamico", "elegante", "divertido", "emocionante"]
 EFEITOS_F = ["vinheta", "granulado", "letterbox", "flash_batida", "luz_quente"]
 
-DEFAULTS = {"titulo": "", "subtitulo": "", "estilo": "auto", "formatos": ["16:9"], "duracao": 0, "trilha": "", "contexto": ""}
+DEFAULTS = {"titulo": "", "subtitulo": "", "estilo": "auto", "formatos": ["16:9"], "duracao": 0, "trilha": "", "contexto": "",
+            "pasta_saida": "",      # vazio = "Pasta dos finais" do kit (padrão ~/Movies/CorteX9/Finais/AAAA-MM-DD/cliente/projeto)
+            "enviar_drive": True,   # copia o final para o Google Drive depois de exportar
+            "pasta_drive": ""}      # dentro do Drive; vazio = CorteX9/AAAA-MM-DD/cliente/projeto
 
 
 # ------------------------------------------------------------------ banco
@@ -48,6 +51,13 @@ def create(folder, preset_id=None, **opts):
     if preset_id is None:
         preset_id = db.one("SELECT id FROM presets ORDER BY id LIMIT 1")["id"]
     o = {**DEFAULTS, **{k: v for k, v in opts.items() if v not in (None, "")}}
+    if o.get("pasta_saida"):
+        out = Path(o["pasta_saida"]).expanduser()
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise ValueError(f"Não consegui usar a pasta de destino {out}: {e.strerror or e}") from None
+        o["pasta_saida"] = str(out)
     if not o.get("trilha"):
         inside = [f for f in sorted(folder.iterdir()) if f.suffix.lower() in AUDIO_EXTS]
         if inside:
@@ -58,7 +68,9 @@ def create(folder, preset_id=None, **opts):
     db.update("photo_projects", pid, work_dir=str(work))
     from . import jobs
     jobs.enqueue("analise", "photo_analyze", payload={"project_id": pid})
-    log.info("Novo vídeo de fotos %s: %s (%s fotos)", pid, folder, len(photos))
+    eventlog.info(f"Projeto criado: {folder} ({len(photos)} fotos) · formatos {', '.join(o['formatos'])} · trilha: {o.get('trilha') or 'nenhuma'}"
+                  + f" · finais em: {o.get('pasta_saida') or 'pasta do kit'} · Drive: {'sim' if o.get('enviar_drive', True) else 'não'}",
+                  kind="fotos", ref=pid, step="criação")
     return pid
 
 
@@ -77,7 +89,7 @@ def _stage(pid, name, progress=None, status=None):
     if status:
         kv["status"] = status
     _set(pid, **kv)
-    log.info("Fotos %s: %s", pid, name)
+    eventlog.info(name, kind="fotos", ref=pid)
 
 
 def _warn(pid, msg):
@@ -86,6 +98,7 @@ def _warn(pid, msg):
     meta.setdefault("avisos", [])
     if msg not in meta["avisos"]:
         meta["avisos"].append(msg)
+        eventlog.warn(msg, kind="fotos", ref=pid)
     _set(pid, meta=meta)
 
 
@@ -207,7 +220,7 @@ def enhance(im, q, upscale=1.0):
     return im.filter(ImageFilter.UnsharpMask(radius=radius, percent=percent, threshold=3))
 
 
-def ajustes_texto(q, low_res=False, ia_upscale=False):
+def ajustes_texto(q, low_res=False):
     a = ["balanço de branco", "níveis"]
     if q["gamma"] < 0.98:
         a.append("clareou")
@@ -224,9 +237,7 @@ def ajustes_texto(q, low_res=False, ia_upscale=False):
     if q["reduzir_ruido"]:
         a.append("redução de ruído")
     a.append("nitidez")
-    if ia_upscale:
-        a.append("upscale IA (Magnific)")
-    elif low_res:
+    if low_res:
         a.append("baixa resolução: upscale lanczos")
     if q["borrada"]:
         a.append("foto tremida/borrada")
@@ -602,6 +613,7 @@ def analyze(pid):
             infos.append(analyze_photo(f, work / "miniaturas", i))
         except Exception as e:  # noqa: BLE001
             _warn(pid, f"Foto ignorada ({f.name}): {explain('foto', e).reason}")
+            eventlog.warn(f"Detalhe da foto ignorada {f.name}", kind="fotos", ref=pid, detail=f"{type(e).__name__}: {e}")
         _set(pid, progress=0.03 + 0.25 * (i + 1) / len(files))
     infos, dups = dedupe(infos)
     if dups:
@@ -612,21 +624,8 @@ def analyze(pid):
     if len(infos) < 2:
         raise StepError("fotos", "Depois de tirar as repetidas, sobrou menos de 2 fotos.", "Adicione mais fotos diferentes na pasta.")
     low = [f for f in infos if min(f["w"], f["h"]) < 900]
-    if low and services.get("magnific_api_key"):
-        _stage(pid, f"Upscale IA de {min(len(low), 15)} foto(s) de baixa resolução", 0.3)
-        (work / "upscale").mkdir(exist_ok=True)
-        for f in low[:15]:
-            try:
-                src = work / "upscale" / f"o{f['i']:03d}.jpg"
-                _open(f["arquivo"]).save(src, quality=95)
-                out = work / "upscale" / f"hd{f['i']:03d}.jpg"
-                services.magnific_upscale(src, out, -pid)
-                f["arquivo_hd"] = str(out)
-                f["ajustes"] = ajustes_texto(f["qualidade"], low_res=True, ia_upscale=True)
-            except Exception as e:  # noqa: BLE001
-                _warn(pid, f"Magnific ({f['nome']}): {explain('upscale', e).reason} Usei upscale local.")
-    elif low:
-        _warn(pid, f"{len(low)} foto(s) de baixa resolução: ampliadas com upscale local. Configure o Magnific em Conexões para upscale por IA.")
+    if low:
+        _warn(pid, f"{len(low)} foto(s) de baixa resolução: ampliadas com upscale local (lanczos + nitidez).")
     blur = [f["nome"] for f in infos if f["qualidade"]["borrada"]]
     if blur:
         _warn(pid, f"Foto(s) tremida(s)/borrada(s): {', '.join(blur[:10])}. A IA evita usá-las em destaque.")
@@ -664,6 +663,8 @@ def analyze(pid):
     plan = sanitize(plan, infos, music, opts)
     plan["_tempos"] = timeline(plan, music, target)
     plan["_alvo"] = target
+    eventlog.info(f"Plano pronto ({engine}): {len(plan['cenas'])} cenas, {fmt_t(plan['_tempos'][-1])}, {len(plan['variacoes'])} versões", kind="fotos", ref=pid,
+                  detail=json.dumps({k: v for k, v in plan.items() if k != "_tempos"}, ensure_ascii=False, indent=1)[:15000])
     meta = (get(pid)["meta"] or {})
     meta.update(motor=engine, fotos=infos, duplicadas=dups, trilha=str(mpath) if mpath else None,
                 musica={k: music[k] for k in ("duracao", "bpm", "picos")} if music else None)
@@ -825,7 +826,10 @@ def render(pid, var_idx, kind, fmt, out: Path):
             vf.append(f"eq=brightness=0.25:enable='between(t,{b:.2f},{b + 0.08:.2f})'")
     vf.append("fade=t=in:st=0:d=0.8")
     vf.append(f"fade=t=out:st={max(0, total - 1.2):.2f}:d=1.2")
-    vf.append(f"subtitles=filename='{ff.esc_filter_path(ass)}'")
+    if ff.has_filter("subtitles"):
+        vf.append(f"subtitles=filename='{ff.esc_filter_path(ass)}'")
+    else:
+        _warn(pid, "Textos e títulos desligados: o FFmpeg deste Mac não tem libass. Rode o instalador novo do CorteX9 para ativá-los.")
     filt.append(f"{cur}{','.join(vf)}[vmain]")
     vcur = "[vmain]"
     idx = n
@@ -848,12 +852,17 @@ def render(pid, var_idx, kind, fmt, out: Path):
     out.parent.mkdir(parents=True, exist_ok=True)
     common = [*inputs, "-filter_complex_script", str(script), "-map", vcur, *(["-map", acur] if acur else []),
               "-t", f"{total:.3f}", "-r", str(FPS), "-pix_fmt", "yuv420p", *(ff.audio_args(kind) if acur else []), "-movflags", "+faststart"]
+    # limite de tempo: um render travado vira erro explicado no Log em vez de "Gerando prévias" para sempre
+    limit = max(600, total * (20 if kind == "preview" else 60) * max(1, len(plan["cenas"]) / 20))
+    step = f"vídeo de fotos ({'prévia' if kind == 'preview' else 'final'} {fmt}, V{var_idx + 1})"
+    eventlog.info(f"Renderizando {W}x{H}, {n} cenas, {fmt_t(total)}" + (" com trilha" if acur else " sem trilha"), kind="fotos", ref=pid, step=step)
     try:
-        ff.run([*common, *ff.video_args(kind), str(out)], step=f"vídeo de fotos ({kind})")
+        ff.run([*common, *ff.video_args(kind), str(out)], step=step, timeout=limit)
     except Exception:  # noqa: BLE001
         if not ff.hw_available():
             raise
-        ff.run([*common, *ff.video_args(kind, force_software=True), str(out)], step=f"vídeo de fotos ({kind})")
+        eventlog.warn("Encoder de hardware (VideoToolbox) falhou: tentando de novo com encoder de software.", kind="fotos", ref=pid, step=step)
+        ff.run([*common, *ff.video_args(kind, force_software=True), str(out)], step=step, timeout=limit * 2)
     return {"path": str(out), "duration": total}
 
 
@@ -898,8 +907,14 @@ def _check_previews(pid):
         return
     ok = sum(1 for v in vs if v["status"] == "pronta")
     mins = (time.time() - p["created_at"]) / 60
+    first_err = next((v.get("erro") for v in vs if v.get("erro")), None)
     _set(pid, status="aguardando_aprovacao" if ok else "erro", stage="Prévias prontas para aprovação" if ok else "Nenhuma prévia renderizou",
-         progress=1.0, previews_ready_at=db.now())
+         progress=1.0, previews_ready_at=db.now(), error=None if ok else json.dumps(first_err, ensure_ascii=False) if first_err else None)
+    if ok:
+        eventlog.info(f"{ok} de {len(vs)} prévias prontas (levou {mins:.0f} min)", kind="fotos", ref=pid)
+    else:
+        eventlog.error("Nenhuma prévia renderizou" + (f": {first_err.get('motivo', '').rstrip('.')}" if first_err else "") + ". O comando do FFmpeg e a resposta dele estão no erro logo abaixo.",
+                       kind="fotos", ref=pid)
     if ok:
         notify.send("CorteX9 — vídeo de fotos", f"{p['title']}: {ok} versões prontas para aprovar (levou {mins:.0f} min).")
 
@@ -1006,16 +1021,26 @@ def final(pid):
     opts = {**DEFAULTS, **(p["options"] or {})}
     _set(pid, status="renderizando_final", stage="Renderizando o final em alta")
     today = date.today().isoformat()
-    outdir = Path(preset.get("pasta_saida") or paths.DEFAULT_OUTPUT).expanduser() / today / safe(preset["cliente"]) / safe(preset["projeto"])
+    outdir = output_dir(p, preset, opts, today)
+    eventlog.info(f"Destino no computador: {outdir}", kind="fotos", ref=pid, step="render final")
     finals = []
     for fmt in opts["formatos"]:
         out = outdir / f"{safe(p['title'])}_fotos_{fmt.replace(':', 'x')}.mp4"
         res = render(pid, p["chosen"] or 0, "final", fmt, out)
         finals.append({"formato": fmt, "arquivo": res["path"], "duracao": round(res["duration"], 1)})
+        eventlog.info(f"Final salvo: {res['path']}", kind="fotos", ref=pid, step="render final")
     _set(pid, finals=finals, status="concluido", stage="Final pronto", finished_at=db.now(), progress=1.0)
-    if preset.get("arquivar_drive", True) and (services.get("drive_pasta_local") or services.get("gdrive_service_account")):
+    drive_on = opts.get("enviar_drive", True) and preset.get("arquivar_drive", True)
+    if drive_on and (services.get("drive_pasta_local") or services.get("gdrive_service_account")):
+        sub = drive_subpath(preset, opts, today)
         services.enqueue("gdrive", "arquivar", {"arquivos": [f["arquivo"] for f in finals], "data": today,
-                                                "cliente": safe(preset["cliente"]), "projeto": safe(preset["projeto"])})
+                                                "cliente": safe(preset["cliente"]), "projeto": safe(preset["projeto"]),
+                                                "destino": sub, "photo_id": pid})
+        _drive_state(pid, "na_fila", f"Enviando para o Drive: {sub}")
+        eventlog.info(f"Envio ao Google Drive na fila: {sub}", kind="fotos", ref=pid, step="Drive")
+    elif drive_on:
+        _drive_state(pid, "nao_configurado", "Google Drive não configurado em Conexões: o final ficou só no computador.")
+        _warn(pid, "Google Drive não configurado em Conexões: o final ficou só no computador.")
     if services.get("base44_api_key"):
         services.enqueue("base44", "upsert", {"entidade": "CorteFicha", "chave": "corte_id", "dados": {
             "corte_id": f"fotos{pid}", "cliente": preset["cliente"], "projeto": preset["projeto"], "episodio": p["title"],
@@ -1023,6 +1048,29 @@ def final(pid):
             "duracao_s": finals[0]["duracao"], "lut": (p["plan"]["variacoes"][p["chosen"] or 0]).get("lut"), "tipo": "video_de_fotos",
             "experimental": False, "link_drive": "", "data": today}})
     notify.send("CorteX9 — vídeo de fotos pronto", f"{p['title']}: final em {', '.join(opts['formatos'])}.")
+
+
+def output_dir(p, preset, opts, today=None):
+    """Pasta do computador onde o final é salvo."""
+    from .pipeline import safe
+    today = today or date.today().isoformat()
+    if opts.get("pasta_saida"):
+        return Path(opts["pasta_saida"]).expanduser()
+    return Path(preset.get("pasta_saida") or paths.DEFAULT_OUTPUT).expanduser() / today / safe(preset["cliente"]) / safe(preset["projeto"])
+
+
+def drive_subpath(preset, opts, today=None):
+    """Pasta dentro do Google Drive (relativa a 'Meu Drive')."""
+    from .pipeline import safe
+    today = today or date.today().isoformat()
+    custom = (opts.get("pasta_drive") or "").strip().strip("/")
+    return custom or f"CorteX9/{today}/{safe(preset['cliente'])}/{safe(preset['projeto'])}"
+
+
+def _drive_state(pid, estado, msg, links=None):
+    meta = get(pid)["meta"] or {}
+    meta["drive"] = {"estado": estado, "mensagem": msg, "links": links or [], "em": db.now()}
+    _set(pid, meta=meta)
 
 
 # ------------------------------------------------------------------ pasta vigiada de fotos

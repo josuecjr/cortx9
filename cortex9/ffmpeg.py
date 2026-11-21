@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 from .errors import StepError
 
@@ -13,7 +14,9 @@ log = logging.getLogger("cortex9.ffmpeg")
 
 
 def _bin(name):
-    for p in (shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}"):
+    # ffmpeg-full (Homebrew) primeiro: traz libass (textos/legendas), que o ffmpeg "enxuto" do Homebrew pode não ter.
+    for p in (f"/opt/homebrew/opt/ffmpeg-full/bin/{name}", f"/usr/local/opt/ffmpeg-full/bin/{name}",
+              shutil.which(name), f"/opt/homebrew/bin/{name}", f"/usr/local/bin/{name}"):
         if p and os.path.exists(p):
             return p
     raise StepError("ffmpeg", f"{name} não encontrado.", "Rode o instalador do CorteX9 de novo (ele instala o FFmpeg pelo Homebrew).")
@@ -27,13 +30,33 @@ def FFPROBE():
     return _bin("ffprobe")
 
 
+def _cmdline(cmd):
+    import shlex
+    return " ".join(shlex.quote(str(c)) for c in cmd)
+
+
 def run(args, step="ffmpeg", timeout=None):
+    from . import eventlog
+    from .errors import explain
     cmd = [FFMPEG(), "-hide_banner", "-nostdin", "-y", *map(str, args)]
     log.debug("ffmpeg %s", " ".join(cmd[1:]))
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    t0 = time.time()
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        err = explain(step, TimeoutError(f"FFmpeg passou de {timeout:.0f} s e foi interrompido (travou)"))
+        out = e.stderr or ""
+        out = out.decode("utf-8", "replace") if isinstance(out, bytes) else out
+        eventlog.error(f"FFmpeg travou e foi interrompido depois de {timeout:.0f} s", step=step,
+                       detail=f"Comando:\n{_cmdline(cmd)}\n\nSaída do FFmpeg:\n{out[-6000:]}")
+        raise err from None
     if p.returncode != 0:
-        from .errors import explain
-        raise explain(step, RuntimeError(p.stderr[-3000:]))
+        tail = p.stderr[-6000:]
+        err = explain(step, RuntimeError(p.stderr[-3000:]))
+        eventlog.error(f"FFmpeg falhou (código {p.returncode}): {err.reason}", step=step,
+                       detail=f"Comando:\n{_cmdline(cmd)}\n\nSaída do FFmpeg (final):\n{tail}")
+        raise err
+    log.debug("ffmpeg ok em %.1fs", time.time() - t0)
     return p.stderr
 
 
@@ -66,6 +89,32 @@ def probe(path):
 def encoders():
     p = subprocess.run([FFMPEG(), "-hide_banner", "-encoders"], capture_output=True, text=True)
     return {name for name in ("h264_videotoolbox", "hevc_videotoolbox", "libx264", "aac_at") if name in p.stdout}
+
+
+@functools.lru_cache
+def filters():
+    p = subprocess.run([FFMPEG(), "-hide_banner", "-filters"], capture_output=True, text=True)
+    names = set()
+    for line in p.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and "->" in parts[2]:
+            names.add(parts[1])
+    return names
+
+
+def has_filter(name):
+    try:
+        return name in filters()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def capabilities():
+    """O que este FFmpeg consegue fazer (vai para o diagnóstico da aba Log)."""
+    enc = encoders()
+    return {"textos/legendas (libass)": has_filter("subtitles"), "LUT 3D": has_filter("lut3d"), "transições (xfade)": has_filter("xfade"),
+            "movimento (zoompan)": has_filter("zoompan"), "loudnorm": has_filter("loudnorm"),
+            "VideoToolbox": "h264_videotoolbox" in enc, "libx264": "libx264" in enc}
 
 
 def hw_available():

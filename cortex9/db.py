@@ -145,7 +145,6 @@ DEFAULT_PRESET = {
     "idioma": "pt",
     "voz": "local",               # local | elevenlabs
     "fonte_trilha": "kit",         # kit | epidemic
-    "magnific_capa": False,         # upscale/ilustração de capa via Magnific
     "pasta_saida": "",
     "arquivar_drive": True,
     "contexto": "",                # descrição livre do cliente/tom, vai para a IA diretora

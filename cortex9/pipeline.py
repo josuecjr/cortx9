@@ -9,7 +9,7 @@ import time
 from datetime import date
 from pathlib import Path
 
-from . import db, director, notify, paths, render, services, style, transcribe
+from . import db, director, eventlog, notify, paths, render, services, style, transcribe
 from . import ffmpeg as ff
 from .errors import StepError, explain
 
@@ -32,7 +32,7 @@ def stage(ep_id, name, progress=None, status=None):
     if status:
         vals["status"] = status
     db.update("episodes", ep_id, **vals)
-    log.info("Episódio %s: %s", ep_id, name)
+    eventlog.info(name, kind="episodio", ref=ep_id)
 
 
 def add_warning(ep_id, msg):
@@ -41,6 +41,7 @@ def add_warning(ep_id, msg):
     meta.setdefault("avisos", [])
     if msg not in meta["avisos"]:
         meta["avisos"].append(msg)
+        eventlog.warn(msg, kind="episodio", ref=ep_id)
     db.update("episodes", ep_id, meta=meta)
 
 
@@ -399,18 +400,8 @@ def final(cut_id):
         name = f"{safe(preset['cliente'])}_{safe(ep['title'])}_corte{cut['idx']:02d}_{fmt.replace(':', 'x')}.mp4"
         res = render_job(cut, v, "final", fmt, outdir / name)
         finals.append({"formato": fmt, "arquivo": res["path"], "duracao": round(res["duration"], 1)})
-    cover = None
-    if preset.get("magnific_capa") and services.get("magnific_api_key"):
-        try:
-            raw = outdir / f"capa_corte{cut['idx']:02d}_bruta.jpg"
-            ff.run(["-ss", "1.2", "-i", finals[0]["arquivo"], "-frames:v", "1", "-q:v", "2", str(raw)], step="capa")
-            cover = outdir / f"capa_corte{cut['idx']:02d}.jpg"
-            services.magnific_upscale(raw, cover, ep["id"], prompt=cut["plan"].get("tema", ""))
-            raw.unlink(missing_ok=True)
-        except Exception as e:  # noqa: BLE001
-            add_warning(ep["id"], f"Magnific (capa do corte {cut['idx']}): {explain('capa', e).reason}")
     db.update("cuts", cut_id, status="finalizado", finals=finals)
-    files = [f["arquivo"] for f in finals] + ([str(cover)] if cover and cover.exists() else [])
+    files = [f["arquivo"] for f in finals]
     if preset.get("arquivar_drive", True) and (services.get("drive_pasta_local") or services.get("gdrive_service_account")):
         services.enqueue("gdrive", "arquivar", {"arquivos": files, "data": today, "cliente": safe(preset["cliente"]),
                                                 "projeto": safe(preset["projeto"]), "cut_id": cut_id})

@@ -1,8 +1,8 @@
-# CorteX9 2.2.1 — instalar e testar
+# CorteX9 2.3.0 — instalar e testar
 
 ## 1. Instalar (uma vez)
 
-1. Descompacte `CorteX9-2.2.1-mac.zip`.
+1. Descompacte `CorteX9-2.3.0-mac.zip`.
 2. Clique com o **botão direito** em `Instalar CorteX9.command` → **Abrir** → **Abrir**.
    (O macOS bloqueia o duplo clique em scripts baixados. Se ainda bloquear: Ajustes do Sistema → Privacidade e Segurança → "Abrir Mesmo Assim".)
 3. O Terminal instala Homebrew (se faltar), FFmpeg, Python, Whisper MLX e o modelo (~1,6 GB). Na primeira vez leva de 5 a 15 min.
@@ -12,7 +12,7 @@ Para **atualizar**, rode o instalador novo do mesmo jeito: ele fecha o app abert
 
 ## 2. Configurar (5 minutos)
 
-**Conexões** — cole as chaves, clique **Salvar** e depois **Testar** em cada uma. Elas vão para o Keychain.
+**Conexões** — clique no botão **↗** de cada serviço para abrir a página onde se cria a chave, cole a chave, clique **Salvar** e depois **Testar**. Elas vão para o Keychain.
 
 | Serviço | Obrigatório? | Onde pegar |
 |---|---|---|
@@ -22,7 +22,6 @@ Para **atualizar**, rode o instalador novo do mesmo jeito: ele fecha o app abert
 | Base44 | Opcional | No app Base44 crie as entidades `CorteFicha`, `EpisodioCliente` e `CustoEpisodio`, depois pegue a chave da API, o ID e a URL do app. |
 | ElevenLabs | Opcional | elevenlabs.io → Profile → API key |
 | Epidemic Sound | Opcional | Token da Partner API (exige contrato de parceiro) |
-| Magnific | Opcional | Chave da API Freepik/Magnific |
 | Celular | Opcional | Instale o app **ntfy** no celular, assine um tópico com nome difícil (ex.: `cortex9-joao-8f3k`) e cole o mesmo nome aqui |
 
 **Kits por cliente** — edite o kit "Padrão" ou crie um por cliente: formatos, rotação do YoloBox, pasta do kit no Drive (o app acha `logo*.png`, `abertura*.mp4`, `encerramento*.mp4` e trilhas `.mp3/.wav`; nomeie trilhas pelo clima, ex. `epico_1.mp3`, `intimista.mp3`), legenda e efeitos.
@@ -61,16 +60,24 @@ Na tela **Fila**, clique em **Gerar episódio de teste**. O app cria um vídeo d
 
 1. Menu **Vídeo de fotos** → escolha a **pasta de fotos** e a **trilha** (MP3, WAV ou M4A).
 2. Opcional: título, subtítulo, estilo (cinematográfico, dinâmico, elegante…), duração e formatos. Para 1920×1080, deixe marcado **16:9**.
-3. Clique **Criar vídeo**. A IA enquadra sem distorcer, ordena, sincroniza com as batidas, anima e cria os textos.
-4. Quando chegar a notificação, compare **V1** e **V2**, peça um ajuste se quiser (ex.: `mais rápido`, `título: Viagem à Serra`, `duração: 45`) e clique **Aprovar e renderizar**.
-5. O final vai para a mesma pasta de finais dos cortes.
+3. Em **Onde salvar o vídeo**, escolha a pasta do computador (vazio = pasta do kit) e se o final vai para o Google Drive (e em qual pasta dentro de "Meu Drive"). Dá para mudar depois, na tela do projeto, antes de aprovar.
+4. Clique **Criar vídeo**. A IA enquadra sem distorcer, ordena, sincroniza com as batidas, anima e cria os textos.
+5. Quando chegar a notificação, compare **V1** e **V2**, peça um ajuste se quiser (ex.: `mais rápido`, `título: Viagem à Serra`, `duração: 45`) e clique **Aprovar e renderizar**.
+6. O final vai para a pasta escolhida e, se marcado, para o Drive. A tela do projeto mostra os dois caminhos.
 
 Fotos repetidas (mesmo nome, cópias "(1)", versão do WhatsApp, HEIC + JPG, foto girada) são removidas automaticamente — fica só a melhor. Cada foto recebe ajuste automático de cor, exposição, ruído e nitidez; o **Roteiro** mostra o que foi feito em cada uma.
 
 Atalho: arraste uma **pasta de fotos** (com o MP3 dentro) para `~/Movies/CorteX9/Entrada`. O vídeo começa sozinho.
 
+## Quando algo der errado: aba Log
+
+1. Abra a aba **Log** (ou o botão **Log** do projeto com erro).
+2. O erro mais importante já vem aberto, com o **detalhe técnico** (comando do FFmpeg e resposta dele).
+3. Abra **Diagnóstico do Mac e do FFmpeg**: se aparecer `textos/legendas (libass): NÃO`, rode o instalador desta versão de novo.
+4. Para pedir ajuda, clique **Copiar** (ou **Exportar .txt**) e cole/envie o texto.
+
 ## Onde ficam as coisas
 
 - App: `~/Applications/CorteX9.app`
 - Dados, prévias, LUTs e banco: `~/Library/Application Support/CorteX9/`
-- Log (para suporte): `~/Library/Application Support/CorteX9/logs/cortex9.log`
+- Log: aba **Log** no app; arquivo completo em `~/Library/Application Support/CorteX9/logs/cortex9.log`; exportações vão para a Mesa

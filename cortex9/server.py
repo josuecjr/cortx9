@@ -23,6 +23,9 @@ def _allowed(p: Path):
     for pr in db.q("SELECT data FROM presets"):
         if (pr["data"] or {}).get("pasta_saida"):
             roots.append(Path(pr["data"]["pasta_saida"]).expanduser())
+    for pr in db.q("SELECT options FROM photo_projects"):  # destino escolhido no projeto
+        if (pr["options"] or {}).get("pasta_saida"):
+            roots.append(Path(pr["options"]["pasta_saida"]).expanduser())
     return any(str(p).startswith(str(r.resolve())) for r in roots)
 
 

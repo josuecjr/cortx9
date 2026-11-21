@@ -1,5 +1,26 @@
 # Histórico de versões do CorteX9
 
+## 2.3.0 — Aba Log, sem Magnific e destino do vídeo · 21/11/2026
+
+### Novo
+- **Aba Log**: tudo o que o app faz fica registrado com data, projeto (#), etapa e nível (info, aviso, erro).
+  - Cada erro mostra o motivo, como resolver e o **detalhe técnico**: o comando completo do FFmpeg e a resposta dele, ou a resposta do serviço (Drive, Base44, Claude…).
+  - Filtros por projeto e por nível (tudo, avisos e erros, só erros) e busca por texto.
+  - **Copiar**, **Exportar .txt** (salva na Mesa e abre no Finder) e **Arquivo completo** (`cortex9.log`), para mandar ao suporte.
+  - **Diagnóstico do Mac e do FFmpeg**: versão, caminho e recursos do FFmpeg (textos/libass, LUT, transições), VideoToolbox, espaço em disco.
+  - Botão **Log** em cada projeto e episódio, que abre o log já filtrado. A barra lateral mostra quantos erros houve nas últimas 24 h.
+- **Onde salvar o vídeo**: ao criar o vídeo de fotos (e depois, na tela do projeto, antes de aprovar) você escolhe a **pasta no computador** e se o final vai para o **Google Drive**, e em qual pasta do Drive. O projeto mostra onde o final foi salvo e se o envio ao Drive terminou.
+- **Conexões**: cada serviço tem um botão que abre direto a página onde se cria a chave de API.
+
+### Corrigido
+- **"Nenhuma prévia renderizou" sem explicação**: o motivo agora aparece no projeto, na lista de projetos e no Log.
+  - Causa encontrada: o FFmpeg do Homebrew pode vir **sem libass** (o recurso que desenha títulos e textos), e aí toda prévia falhava. O instalador agora detecta isso e instala o `ffmpeg-full`; o app usa o FFmpeg completo quando existe e, se ainda faltar libass, gera o vídeo **sem os textos** (com aviso) em vez de falhar.
+- **Projeto parado em "Gerando prévias"**: um render que trava agora é interrompido depois de um limite de tempo e vira erro explicado, com "Tentar de novo".
+- Botão **Tentar de novo** também na lista de projetos, e para projetos **parados** (nada rodando, ex.: app fechado no meio do render): ele refaz só o que faltou.
+
+### Removido
+- **Magnific** saiu do app e do fluxo: conexão, upscale de fotos de baixa resolução (agora sempre local) e capa dos cortes. A chave guardada no Keychain é apagada ao abrir o app.
+
 ## 2.2.1 — Instalador de atualização · 21/11/2026
 
 - O instalador agora serve também para **atualizar**: fecha o CorteX9 se estiver aberto, mostra a versão instalada, atualiza as dependências e reabre o app. Dados, kits, pastas vigiadas, biblioteca de estilo e chaves do Keychain são mantidos.

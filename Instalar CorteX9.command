@@ -41,6 +41,18 @@ brew list ffmpeg >/dev/null 2>&1 || brew install ffmpeg
 brew list python@3.12 >/dev/null 2>&1 || brew install python@3.12
 PY="$(brew --prefix)/bin/python3.12"
 
+# 2b) O FFmpeg do Homebrew pode vir sem libass (textos/títulos do vídeo). Sem ela as prévias falham.
+FF="$(brew --prefix)/bin/ffmpeg"
+if ! "$FF" -hide_banner -filters 2>/dev/null | grep -qE "^ ... subtitles "; then
+  echo "→ O FFmpeg instalado não tem suporte a textos (libass). Instalando o ffmpeg-full…"
+  brew install ffmpeg-full || echo "   ⚠️  Não consegui instalar o ffmpeg-full. O app funciona, mas sem textos no vídeo de fotos. Veja a aba Log."
+fi
+for cand in "$(brew --prefix)/opt/ffmpeg-full/bin/ffmpeg" "$FF"; do
+  if [ -x "$cand" ] && "$cand" -hide_banner -filters 2>/dev/null | grep -qE "^ ... subtitles "; then
+    echo "   FFmpeg com textos: $cand"; break
+  fi
+done
+
 # 3) Código do app
 echo "→ Copiando o app…"
 mkdir -p "$APPDATA"
@@ -71,8 +83,8 @@ cat > "$BUNDLE/Contents/Info.plist" <<PL
   <key>CFBundleName</key><string>CorteX9</string>
   <key>CFBundleDisplayName</key><string>CorteX9</string>
   <key>CFBundleIdentifier</key><string>app.cortex9.mac</string>
-  <key>CFBundleVersion</key><string>2.2.1</string>
-  <key>CFBundleShortVersionString</key><string>2.2.1</string>
+  <key>CFBundleVersion</key><string>2.3.0</string>
+  <key>CFBundleShortVersionString</key><string>2.3.0</string>
   <key>CFBundleExecutable</key><string>CorteX9</string>
   <key>CFBundleIconFile</key><string>CorteX9</string>
   <key>CFBundlePackageType</key><string>APPL</string>

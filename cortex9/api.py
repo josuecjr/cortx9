@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
-from . import VERSION, db, jobs, luts, paths, pipeline, services, style, transcribe, watcher
+from . import VERSION, db, eventlog, jobs, luts, paths, pipeline, services, style, transcribe, watcher
 from . import ffmpeg as ff
 
 log = logging.getLogger("cortex9.api")
@@ -38,7 +38,9 @@ def state():
                     "preset": (db.one("SELECT name FROM presets WHERE id=?", e["preset_id"]) or {}).get("name")})
     q = jobs.summary()
     pend = db.one("SELECT COUNT(*) n FROM outbox WHERE done=0")["n"]
-    return {"versao": VERSION, "episodios": out, "fila": q, "envios_pendentes": pend,
+    eventlog._ensure()
+    erros = db.one("SELECT COUNT(*) n FROM events WHERE level='erro' AND ts>?", db.now() - 24 * 3600)["n"]
+    return {"versao": VERSION, "erros_recentes": erros, "episodios": out, "fila": q, "envios_pendentes": pend,
             "pastas": [w["path"] for w in db.q("SELECT path FROM watch_folders WHERE enabled=1")],
             "whisper": transcribe.backend_name(), "hw": ff.hw_available()}
 
@@ -186,6 +188,20 @@ def test_connection(id):
     return services.test(id)
 
 
+def open_url(url):
+    """Abre no navegador a página onde se cria a chave (só links conhecidos das Conexões)."""
+    if url not in services.LINK_URLS and not str(url).startswith("https://drive.google.com/"):
+        raise ValueError("Link não reconhecido.")
+    import subprocess
+    import sys
+    import webbrowser
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", url])
+    else:
+        webbrowser.open(url)
+    return True
+
+
 def clear_key(key):
     services.clear_secret(key)
     return services.status_all()
@@ -247,14 +263,28 @@ def demo():
 # ------------------------------------------------------------------ vídeo de fotos
 def photo_projects():
     from . import photos
-    rows = db.q("SELECT id, title, status, stage, progress, created_at, previews_ready_at, finished_at, error, folder FROM photo_projects ORDER BY id DESC LIMIT 60")
+    rows = db.q("SELECT id, title, status, stage, progress, created_at, previews_ready_at, finished_at, error, folder, variations FROM photo_projects ORDER BY id DESC LIMIT 60")
     for r in rows:
         r["erro"] = _err(r.pop("error"))
-    return {"projetos": rows, "estilos": photos.ESTILOS, "formatos": list(photos.SIZES)}
+        vs = r.pop("variations") or []
+        if not r["erro"] and r["status"] == "erro":  # projetos antigos: motivo estava só na versão
+            r["erro"] = next((v.get("erro") for v in vs if v.get("erro")), None)
+        r["travado"] = _photo_stalled(r)
+        r["erros_log"] = (db.one("SELECT COUNT(*) n FROM events WHERE ref_kind='fotos' AND ref_id=? AND level='erro'", r["id"]) or {}).get("n", 0) if _has_events() else 0
+    first = db.one("SELECT data FROM presets ORDER BY id LIMIT 1")
+    kit = {**db.DEFAULT_PRESET, **((first or {}).get("data") or {})}
+    return {"projetos": rows, "estilos": photos.ESTILOS, "formatos": list(photos.SIZES),
+            "destino_padrao": str(Path(kit.get("pasta_saida") or paths.DEFAULT_OUTPUT).expanduser()) + "/AAAA-MM-DD/cliente/projeto",
+            "drive_local": services.get("drive_pasta_local") or "", "drive_api": bool(services.get("gdrive_service_account"))}
+
+
+def _has_events():
+    eventlog._ensure()
+    return True
 
 
 def photo_project(id):
-    from . import photos
+    from . import photos  # noqa: F811
     p = photos.get(id)
     if not p:
         return None
@@ -266,8 +296,17 @@ def photo_project(id):
               "movimento": c["movimento"], "transicao": c["transicao"], "texto": c.get("texto"), "estilo_texto": c.get("estilo_texto"),
               "motivo": c.get("motivo"), "ajustes": fotos.get(c["foto"], {}).get("ajustes", [])} for k, c in enumerate(plan.get("cenas", []))]
     cost = services.episode_cost(-id)
-    return {"id": p["id"], "titulo": p["title"], "status": p["status"], "etapa": p["stage"], "progresso": p["progress"], "pasta": p["folder"],
-            "opcoes": p["options"], "erro": _err(p["error"]), "avisos": meta.get("avisos", []), "motor": meta.get("motor"),
+    _pid, preset = pipeline.preset_of(p)
+    opts = {**photos.DEFAULTS, **(p["options"] or {})}
+    destino = {"computador": str(photos.output_dir(p, preset, opts)), "drive_pasta": photos.drive_subpath(preset, opts),
+               "enviar_drive": bool(opts.get("enviar_drive", True) and preset.get("arquivar_drive", True)),
+               "drive_configurado": bool(services.get("drive_pasta_local") or services.get("gdrive_service_account")),
+               "drive": meta.get("drive")}
+    erro = _err(p["error"])
+    if not erro and p["status"] == "erro":
+        erro = next((v.get("erro") for v in (p["variations"] or []) if v.get("erro")), None)
+    return {"travado": _photo_stalled(p), "destino": destino,"id": p["id"], "titulo": p["title"], "status": p["status"], "etapa": p["stage"], "progresso": p["progress"], "pasta": p["folder"],
+            "opcoes": p["options"], "erro": erro, "avisos": meta.get("avisos", []), "motor": meta.get("motor"),
             "musica": meta.get("musica"), "trilha": meta.get("trilha"), "titulo_video": plan.get("titulo"), "justificativa": plan.get("justificativa"),
             "fotos_total": len(fotos), "cenas": cenas, "duplicadas": meta.get("duplicadas", []), "escolhida": p["chosen"], "custo": cost, "ajuste": meta.get("ajuste"),
             "finais": [{**f, "url": media(f["arquivo"])} for f in (p["finals"] or [])],
@@ -275,10 +314,68 @@ def photo_project(id):
                           for x in (p["variations"] or [])]}
 
 
-def create_photo_video(pasta, trilha="", titulo="", subtitulo="", estilo="auto", formatos=None, duracao=0, contexto="", preset_id=None):
+def create_photo_video(pasta, trilha="", titulo="", subtitulo="", estilo="auto", formatos=None, duracao=0, contexto="", preset_id=None,
+                       pasta_saida="", enviar_drive=True, pasta_drive=""):
     from . import photos
     return photos.create(pasta, preset_id, trilha=trilha, titulo=titulo, subtitulo=subtitulo, estilo=estilo,
-                         formatos=formatos or ["16:9"], duracao=float(duracao or 0), contexto=contexto)
+                         formatos=formatos or ["16:9"], duracao=float(duracao or 0), contexto=contexto,
+                         pasta_saida=pasta_saida, enviar_drive=bool(enviar_drive), pasta_drive=pasta_drive)
+
+
+def photo_set_destination(id, pasta_saida=None, enviar_drive=None, pasta_drive=None):
+    """Muda o destino do final (computador e Drive) antes de aprovar."""
+    from . import photos
+    p = photos.get(id)
+    if not p:
+        raise ValueError("Projeto não encontrado.")
+    o = dict(p["options"] or {})
+    if pasta_saida is not None:
+        if pasta_saida.strip():
+            out = Path(pasta_saida).expanduser()
+            out.mkdir(parents=True, exist_ok=True)
+            o["pasta_saida"] = str(out)
+        else:
+            o["pasta_saida"] = ""
+    if enviar_drive is not None:
+        o["enviar_drive"] = bool(enviar_drive)
+    if pasta_drive is not None:
+        o["pasta_drive"] = pasta_drive.strip().strip("/")
+    db.update("photo_projects", id, options=o)
+    eventlog.info(f"Destino alterado · computador: {o.get('pasta_saida') or 'pasta do kit'} · Drive: "
+                  + (f"sim ({o.get('pasta_drive') or 'pasta padrão'})" if o.get("enviar_drive", True) else "não"), kind="fotos", ref=id, step="destino")
+    return photo_project(id)
+
+
+# ------------------------------------------------------------------ log
+def log_events(nivel=None, tipo=None, ref=None, texto=None, limite=400):
+    return {"eventos": eventlog.query(level=nivel or None, kind=tipo or None, ref=ref, text=(texto or "").strip() or None, limit=min(int(limite or 400), 2000)),
+            "projetos": eventlog.refs()}
+
+
+def log_diagnostics():
+    return eventlog.diagnostics()
+
+
+def log_export(nivel=None, tipo=None, ref=None, texto=None):
+    path = eventlog.export_file(level=nivel or None, kind=tipo or None, ref=ref, text=(texto or "").strip() or None)
+    pipeline.reveal(path)
+    return path
+
+
+def log_text(nivel=None, tipo=None, ref=None, texto=None):
+    return eventlog.export_text(level=nivel or None, kind=tipo or None, ref=ref, text=(texto or "").strip() or None)
+
+
+def log_open_file():
+    f = paths.LOGS / "cortex9.log"
+    pipeline.reveal(f)
+    return str(f)
+
+
+def log_clear():
+    eventlog.clear()
+    eventlog.info("Log limpo pelo usuário.")
+    return True
 
 
 def photo_choose(id, var):
@@ -307,11 +404,45 @@ def photo_adjust(id, note):
     return True
 
 
+def _photo_active(id):
+    return db.one("SELECT COUNT(*) n FROM jobs WHERE status IN ('queued','running') AND kind LIKE 'photo_%' AND json_extract(payload,'$.project_id')=?", id)["n"]
+
+
+def _photo_stalled(r):
+    return r["status"] in ("na_fila", "processando", "gerando_previas", "ajustando", "renderizando_final") and not _photo_active(r["id"])
+
+
 def photo_retry(id):
+    from . import photos
     rows = db.q("SELECT id FROM jobs WHERE status='failed' AND kind LIKE 'photo_%' AND json_extract(payload,'$.project_id')=?", id)
     for r in rows:
         jobs.retry_job(r["id"])
-    return len(rows)
+    if rows:
+        eventlog.info(f"Tentar de novo: {len(rows)} etapa(s) voltaram para a fila.", kind="fotos", ref=id)
+        return len(rows)
+    # Nada falhou "oficialmente", mas o projeto está parado (ex.: app fechado no meio do render): refaz o que faltou.
+    p = photos.get(id)
+    if not p or _photo_active(id):
+        return 0
+    if not p["plan"]:
+        db.update("photo_projects", id, status="na_fila", stage="De volta à fila", error=None)
+        jobs.enqueue("analise", "photo_analyze", payload={"project_id": id})
+        n = 1
+    elif p["status"] == "renderizando_final":
+        jobs.enqueue("final", "photo_final", payload={"project_id": id})
+        n = 1
+    else:
+        vs = p["variations"] or []
+        todo = [i for i, v in enumerate(vs) if v.get("status") != "pronta"]
+        for i in todo:
+            vs[i].update(status="na_fila", erro=None)
+        db.update("photo_projects", id, variations=vs, status="gerando_previas", error=None, previews_ready_at=None,
+                  stage=f"Gerando prévias ({len(vs) - len(todo)}/{len(vs)})")
+        for i in todo:
+            jobs.enqueue("previa", "photo_preview", payload={"project_id": id, "var": i})
+        n = len(todo)
+    eventlog.info(f"Tentar de novo: projeto estava parado sem nada na fila; {n} etapa(s) recolocadas.", kind="fotos", ref=id)
+    return n
 
 
 def photo_delete(id):

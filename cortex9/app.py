@@ -7,7 +7,7 @@ import sys
 import threading
 from logging.handlers import RotatingFileHandler
 
-from . import APP_NAME, VERSION, api, db, jobs, luts, paths, server, services, watcher
+from . import APP_NAME, VERSION, api, db, eventlog, jobs, luts, paths, secrets, server, services, watcher
 
 
 def setup_logging(verbose=False):
@@ -23,9 +23,37 @@ def setup_logging(verbose=False):
     root.addHandler(sh)
 
 
+def _remove_magnific():
+    """Magnific saiu do CorteX9 (2.3.0): apaga a chave guardada e a opção antiga dos kits."""
+    try:
+        if secrets.has("magnific_api_key"):
+            secrets.delete("magnific_api_key")
+            eventlog.info("Chave da Magnific removida do Keychain (integração retirada do app).")
+        for p in db.q("SELECT id, data FROM presets"):
+            d = p["data"] or {}
+            if "magnific_capa" in d:
+                d.pop("magnific_capa")
+                db.update("presets", p["id"], data=d)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("cortex9").exception("limpeza da Magnific")
+
+
 def start_background():
     stop = threading.Event()
     db.seed()
+    eventlog.install()
+    _remove_magnific()
+    try:
+        diag = eventlog.diagnostics()
+        from . import ffmpeg as ff
+        caps = ff.capabilities()
+        missing = [k for k, v in caps.items() if not v and k != "VideoToolbox"]
+        eventlog.info(f"{APP_NAME} {VERSION} aberto · FFmpeg: {diag.get('FFmpeg versão', diag.get('FFmpeg'))}", step="início",
+                      detail="\n".join(f"{k}: {v}" for k, v in diag.items()))
+        if missing:
+            eventlog.warn("O FFmpeg deste Mac não tem: " + ", ".join(missing) + ". Rode o instalador novo do CorteX9.", step="início")
+    except Exception:  # noqa: BLE001
+        logging.getLogger("cortex9").exception("diagnóstico inicial")
     luts.ensure_all()
     jobs.start(stop)
     threading.Thread(target=watcher.loop, args=(stop,), name="pasta-vigiada", daemon=True).start()

@@ -32,7 +32,8 @@ const pill = (s) => { const [t, c] = STATUS[s] || [s, ""]; return `<span class="
 let view = "fila", currentEp = null, timer = null;
 const ui = { varSel: {}, cutSig: {} };
 
-document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { if (b.dataset.view === "fotos") { ui.foto = null; ui.fsig = null; } go(b.dataset.view); });
+document.querySelectorAll("nav button").forEach((b) => b.onclick = () => { if (b.dataset.view === "fotos") { ui.foto = null; ui.fsig = null; } if (b.dataset.view === "log") ui.logf = { nivel: "", ref: "" }; go(b.dataset.view); });
+function openLog(kind, id, nivel = "") { ui.logf = { nivel, ref: id != null ? `${kind}:${id}` : "" }; go("log"); }
 function go(v, ep) {
   view = v; if (ep !== undefined) currentEp = ep;
   document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("on", b.dataset.view === v));
@@ -41,12 +42,13 @@ function go(v, ep) {
 async function render() {
   clearTimeout(timer);
   try { await VIEWS[view](); } catch (e) { console.error(e); }
-  if (["fila", "aprovacao", "fotos"].includes(view)) timer = setTimeout(render, 2500);
+  if (["fila", "aprovacao", "fotos", "log"].includes(view)) timer = setTimeout(render, view === "log" ? 4000 : 2500);
 }
 async function sysInfo() {
   try {
     const s = await call("state");
     $("#ver").textContent = `v${s.versao}`;
+    const lb = $("#logbadge"); if (lb) { lb.hidden = !s.erros_recentes; lb.textContent = s.erros_recentes || ""; }
     const q = {}; s.fila.forEach((r) => { q[r.lane] = q[r.lane] || {}; q[r.lane][r.status] = r.n; });
     const n = (l, st) => (q[l] || {})[st] || 0;
     $("#sys").innerHTML = `Fila: <b>${n("analise", "running") + n("previa", "running") + n("final", "running")}</b> rodando · <b>${n("analise", "queued") + n("previa", "queued") + n("final", "queued")}</b> esperando<br>
@@ -66,13 +68,14 @@ const VIEWS = {
           ${e.erro ? errBox(e.erro) : ""}${(e.avisos || []).slice(0, 2).map((a) => `<div class="warn">${esc(a)}</div>`).join("")}</div>
         <div><div class="m" style="margin-bottom:6px">${esc(e.etapa || "")}</div><div class="bar"><i style="width:${Math.round((e.progresso || 0) * 100)}%"></i></div>
           <div class="m" style="margin-top:6px">${tot ? `${tot} cortes · ${c.finalizado || 0} finais · ${c.reprovado || 0} reprovados` : ""}</div></div>
-        <div class="row">${pill(e.status)}${e.status === "erro" ? `<button class="btn sm" data-retry="${e.id}">Tentar de novo</button>` : ""}</div></div>`;
+        <div class="row">${pill(e.status)}${e.status === "erro" ? `<button class="btn sm" data-retry="${e.id}">Tentar de novo</button>` : ""}<button class="btn sm" data-elog="${e.id}">Log</button></div></div>`;
     }).join("");
     $("#main").innerHTML = `<div class="row"><div><h1>Fila de episódios</h1><p class="sub">Solte o arquivo da câmera em ${s.pastas.map((p) => `<code>${esc(p)}</code>`).join(", ") || "uma pasta vigiada"} — o resto é automático.</p></div><div class="spacer"></div>
       <button class="btn" id="addf">Adicionar arquivo…</button><button class="btn" id="demo">Gerar episódio de teste</button></div>
       <div class="list">${eps || `<div class="empty">Nenhum episódio ainda.<br>Copie um vídeo para a pasta vigiada ou clique em “Gerar episódio de teste”.</div>`}</div>`;
     document.querySelectorAll("[data-ep]").forEach((el) => el.onclick = (ev) => { if (ev.target.closest("button")) return; go("aprovacao", +el.dataset.ep); });
     document.querySelectorAll("[data-retry]").forEach((b) => b.onclick = async () => { await call("retry", { episode_id: +b.dataset.retry }); toast("Reenviado para a fila."); });
+    document.querySelectorAll("[data-elog]").forEach((b) => b.onclick = () => openLog("episodio", +b.dataset.elog));
     $("#demo").onclick = async () => { $("#demo").disabled = true; toast("Gerando episódio de teste… (leva ~1 min)"); try { const p = await call("demo"); toast(`Episódio de teste solto em ${p}`); } finally { $("#demo").disabled = false; } };
     $("#addf").onclick = async () => { let p = await call("pick", { kind: "file" }); if (!p) p = prompt("Caminho do arquivo de vídeo:"); if (p) { await call("add_file", { path: p }); toast("Episódio adicionado à fila."); } };
   },
@@ -133,6 +136,11 @@ const VIEWS = {
         <div><label>Kit do cliente (logo, legenda, destino)</label><select id="f_kit">${pr.presets.map((p) => `<option value="${p.id}">${esc(p.nome)}</option>`).join("")}</select></div>
         <div><label>Formatos</label><div class="tags">${d.formatos.map((f) => `<label><input type="checkbox" class="f_fmt" value="${f}" ${f === "16:9" ? "checked" : ""}>${f}${f === "16:9" ? " (1920×1080)" : ""}</label>`).join("")}</div></div>
         <div class="full"><label>Contexto para a IA (evento, pessoas, clima)</label><input id="f_contexto" placeholder="ex.: viagem em família para a serra, tom alegre e nostálgico"></div>
+        <div class="full dest"><b>Onde salvar o vídeo</b></div>
+        <div class="full"><label>No computador — vazio = ${esc(d.destino_padrao)}</label><div class="row" style="flex-wrap:nowrap"><input id="f_pasta_saida" placeholder="${esc(d.destino_padrao)}"><button class="btn sm" data-fp="pasta_saida" data-kind="folder">…</button></div></div>
+        <div><label>&nbsp;</label><span class="chk"><input id="f_enviar_drive" type="checkbox" checked> Enviar para o Google Drive depois de exportar</span></div>
+        <div><label>Pasta no Drive (dentro de “Meu Drive”) — vazio = CorteX9/AAAA-MM-DD/cliente/projeto</label><input id="f_pasta_drive" placeholder="ex.: Clientes/Sabrosa/Vídeos"></div>
+        <div class="full why">${d.drive_local ? `Google Drive encontrado em <code>${esc(d.drive_local)}</code>.` : d.drive_api ? "Google Drive pela conta de serviço." : `<span style="color:var(--acc)">Google Drive não configurado</span> — instale o Google Drive para desktop ou configure em <a href="#" id="f_goconn" style="color:var(--acc)">Conexões</a>. Sem ele, o vídeo fica só no computador.`}</div>
         <div class="full row"><div class="spacer"></div><button class="btn pri" id="fgo">Criar vídeo</button></div></div></div>
       <h2>Projetos</h2><div class="list" id="flist"></div>`;
     document.querySelectorAll("[data-fp]").forEach((b) => b.onclick = async () => { const r = await call("pick", { kind: b.dataset.kind }); if (r) $(`#f_${b.dataset.fp}`).value = r; else toast("Cole o caminho no campo (o seletor só abre no app do Mac)."); });
@@ -141,10 +149,51 @@ const VIEWS = {
       if (!$("#f_pasta").value) return toast("Escolha a pasta de fotos.", true);
       if (!formatos.length) return toast("Escolha pelo menos um formato.", true);
       const id = await call("create_photo_video", { pasta: $("#f_pasta").value, trilha: $("#f_trilha").value, titulo: $("#f_titulo").value, subtitulo: $("#f_subtitulo").value,
-        estilo: $("#f_estilo").value, duracao: +$("#f_duracao").value, contexto: $("#f_contexto").value, formatos, preset_id: +$("#f_kit").value });
+        estilo: $("#f_estilo").value, duracao: +$("#f_duracao").value, contexto: $("#f_contexto").value, formatos, preset_id: +$("#f_kit").value,
+        pasta_saida: $("#f_pasta_saida").value, enviar_drive: $("#f_enviar_drive").checked, pasta_drive: $("#f_pasta_drive").value });
       toast("Vídeo de fotos na fila."); ui.foto = id; ui.fsig = null; render();
     };
+    if ($("#f_goconn")) $("#f_goconn").onclick = (e) => { e.preventDefault(); go("conexoes"); };
     await fotoList();
+  },
+
+  // ------------------------------------------------------------ LOG
+  async log() {
+    sysInfo();
+    const f = ui.logf = ui.logf || { nivel: "", ref: "" };
+    if (!$("#logv")) {
+      $("#main").innerHTML = `<div id="logv"><div class="row"><div><h1>Log</h1><p class="sub">Tudo o que o app fez, em qual projeto e em qual etapa, e por que algo falhou. Clique num erro para ver o detalhe técnico (comando do FFmpeg, resposta do serviço).</p></div><div class="spacer"></div>
+        <button class="btn" id="lgcopy">Copiar</button><button class="btn" id="lgexp">Exportar .txt</button><button class="btn" id="lgfile">Arquivo completo</button><button class="btn bad" id="lgclr">Limpar</button></div>
+        <div class="card row logf"><select id="lgnivel" style="width:auto"><option value="">Tudo</option><option value="aviso">Avisos e erros</option><option value="erro">Só erros</option></select>
+          <select id="lgref" style="flex:1"></select><input id="lgtxt" placeholder="Buscar (ex.: ffmpeg, Drive, prévia)" style="flex:1.2"></div>
+        <details class="card" id="lgdiag" style="margin-top:10px"><summary><b>Diagnóstico do Mac e do FFmpeg</b></summary><div id="lgdiagb" class="why" style="margin-top:8px">Carregando…</div></details>
+        <div id="lglist" class="loglist"></div></div>`;
+      $("#lgnivel").value = f.nivel;
+      const upd = () => { f.nivel = $("#lgnivel").value; f.ref = $("#lgref").value; f.texto = $("#lgtxt").value; ui.lsig = null; render(); };
+      $("#lgnivel").onchange = upd; $("#lgref").onchange = upd;
+      let t; $("#lgtxt").oninput = () => { clearTimeout(t); t = setTimeout(upd, 350); };
+      const args = () => { const [k, id] = (f.ref || "").split(":"); return { nivel: f.nivel, tipo: k || null, ref: id ? +id : null, texto: f.texto || "" }; };
+      ui.logargs = args;
+      $("#lgexp").onclick = async () => { const p = await call("log_export", args()); toast(`Log salvo em ${p}`); };
+      $("#lgfile").onclick = async () => { const p = await call("log_open_file"); toast(`Arquivo: ${p}`); };
+      $("#lgclr").onclick = async () => { if (!confirm("Apagar todos os eventos da aba Log? (o arquivo cortex9.log continua)")) return; await call("log_clear"); ui.lsig = null; render(); };
+      $("#lgcopy").onclick = async () => { const txt = await call("log_text", args()); copyText(txt); toast("Log copiado. Cole na conversa com o suporte."); };
+      $("#lgdiag").ontoggle = async () => { if (!$("#lgdiag").open) return; const d = await call("log_diagnostics");
+        $("#lgdiagb").innerHTML = `<table>${Object.entries(d).map(([k, v]) => `<tr><td style="width:180px">${esc(k)}</td><td class="${String(v).includes("PROBLEMA") ? "badtxt" : ""}">${k === "FFmpeg recursos" ? String(v).split(", ").map((x) => `<span class="${x.endsWith("NÃO") && !x.startsWith("VideoToolbox") ? "badtxt" : ""}">${esc(x)}</span>`).join(" · ") : esc(v)}</td></tr>`).join("")}</table>`; };
+    }
+    const d = await call("log_events", ui.logargs());
+    const opts = `<option value="">Todos os projetos</option><option value="app:" ${f.ref === "app:" ? "selected" : ""}>Só o app (sem projeto)</option>` + d.projetos.map((p) => `<option value="${p.kind}:${p.id}" ${f.ref === `${p.kind}:${p.id}` ? "selected" : ""}>${esc(p.nome)}${p.erros ? ` — ${p.erros} erro(s)` : ""}</option>`).join("");
+    if ($("#lgref").dataset.o !== opts) { $("#lgref").innerHTML = opts; $("#lgref").dataset.o = opts; if (f.ref && !$("#lgref").value) { $("#lgref").insertAdjacentHTML("beforeend", `<option value="${esc(f.ref)}" selected>${esc(f.ref.replace(":", " #"))}</option>`); } }
+    const sig = JSON.stringify(d.eventos.map((e) => e.id)); if (ui.lsig === sig) return; ui.lsig = sig;
+    const open = new Set([...document.querySelectorAll(".logrow details[open]")].map((x) => x.dataset.id));
+    const KIND = { fotos: "Fotos", episodio: "Episódio", app: "App" };
+    const auto = (d.eventos.find((x) => x.level === "erro" && (x.detail || "").startsWith("Comando")) || d.eventos.find((x) => x.level === "erro" && x.detail) || {}).id;
+    $("#lglist").innerHTML = d.eventos.length ? d.eventos.map((e) => `<div class="logrow ${e.level}">
+      <span class="lt">${new Date(e.ts * 1000).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
+      <span class="pill ${e.level === "erro" ? "bad" : e.level === "aviso" ? "acc" : ""}">${e.level}</span>
+      <span class="lr">${esc(KIND[e.ref_kind] || e.ref_kind)}${e.ref_id != null ? ` #${e.ref_id}` : ""}</span>
+      <div class="lm">${e.step ? `<b>${esc(e.step)}</b> · ` : ""}${esc(e.message)}${e.detail ? `<details data-id="${e.id}" ${open.has(String(e.id)) || e.id === auto ? "open" : ""}><summary>detalhe técnico</summary><pre>${esc(e.detail)}</pre></details>` : ""}</div></div>`).join("")
+      : `<div class="empty">Nenhum evento com esses filtros.</div>`;
   },
 
   // ------------------------------------------------------------ KITS
@@ -184,7 +233,6 @@ const VIEWS = {
         <div><label>Variações por corte</label><select id="k_variacoes">${[2, 3].map((n) => `<option ${+p.variacoes === n ? "selected" : ""}>${n}</option>`).join("")}</select></div>
         <div><label>Tratamento de voz</label><select id="k_voz"><option value="local" ${p.voz === "local" ? "selected" : ""}>Local (FFmpeg)</option><option value="elevenlabs" ${p.voz === "elevenlabs" ? "selected" : ""}>ElevenLabs + local</option></select></div>
         <div><label>Fonte da trilha</label><select id="k_fonte_trilha"><option value="kit" ${p.fonte_trilha === "kit" ? "selected" : ""}>Kit do cliente</option><option value="epidemic" ${p.fonte_trilha === "epidemic" ? "selected" : ""}>Epidemic Sound (pelo clima)</option></select></div>
-        <div><label>&nbsp;</label><span class="chk"><input id="k_magnific_capa" type="checkbox" ${p.magnific_capa ? "checked" : ""}> Capa com upscale Magnific</span></div>
         <div><label>&nbsp;</label><span class="chk"><input id="k_arquivar_drive" type="checkbox" ${p.arquivar_drive ? "checked" : ""}> Arquivar finais no Google Drive</span></div>
         <div class="full"><label>Contexto para a IA diretora (tom, público, assuntos, nomes próprios)</label><textarea id="k_contexto" rows="3">${esc(p.contexto)}</textarea></div>
       </div></div>`;
@@ -201,7 +249,7 @@ const VIEWS = {
           posicao: $("#kl_posicao").value, maiusculas: $("#kl_maiusculas").checked, palavras_por_linha: +$("#kl_palavras_por_linha").value },
         efeitos: [...document.querySelectorAll(".k_eff:checked")].map((x) => x.value), cortes_min: +v("cortes_min"), cortes_max: +v("cortes_max"),
         duracao_min: +v("duracao_min"), duracao_max: +v("duracao_max"), variacoes: +v("variacoes"), voz: v("voz"), fonte_trilha: v("fonte_trilha"),
-        magnific_capa: $("#k_magnific_capa").checked, arquivar_drive: $("#k_arquivar_drive").checked, contexto: v("contexto") };
+        arquivar_drive: $("#k_arquivar_drive").checked, contexto: v("contexto") };
       if (!dados.formatos.length) return toast("Escolha pelo menos um formato.", true);
       ui.kit = await call("save_preset", { id: cur && cur.id, nome: $("#k_nome").value, dados }); toast("Kit salvo."); render();
     };
@@ -234,7 +282,8 @@ const VIEWS = {
     $("#main").innerHTML = `<h1>Conexões</h1><p class="sub">O processamento pesado roda no Mac. A nuvem só entra para inteligência e recursos que não rodam localmente. Chaves guardadas em: <b>${esc(d.cofre)}</b>.</p>
       <div class="list">${d.servicos.map((s) => `<div class="card conn" data-s="${s.id}">
         <div><div><span class="dot ${s.estado}"></span><b>${esc(s.nome)}</b> &nbsp;<span class="pill">${lbl[s.estado] || s.estado}</span></div>
-          <div class="why" style="margin-top:6px">${esc(s.uso)}</div><div style="margin-top:8px;font-size:12.5px">${esc(s.mensagem || "")}</div></div>
+          <div class="why" style="margin-top:6px">${esc(s.uso)}</div><div style="margin-top:8px;font-size:12.5px">${esc(s.mensagem || "")}</div>
+          ${(s.links || []).length ? `<div class="row" style="margin-top:10px">${s.links.map((l) => `<button class="btn sm keylink" data-url="${esc(l.url)}">↗ ${esc(l.rotulo)}</button>`).join("")}</div>` : ""}</div>
         <div class="form" style="grid-template-columns:1fr">${s.campos.map((c) => `<div><label>${esc(c.label)}</label>${c.key === "gdrive_service_account" ? `<textarea rows="2" data-k="${c.key}" placeholder="${c.value ? "•••••• (guardado)" : "cole o JSON"}"></textarea>` : `<input data-k="${c.key}" ${c.secret ? 'type="password" autocomplete="off"' : ""} placeholder="${c.secret && c.value ? "•••••• (guardada)" : ""}" value="${c.secret ? "" : esc(c.value)}">`}</div>`).join("")}
           <div class="row"><button class="btn sm sv">Salvar</button><button class="btn sm pri ts">Testar</button></div></div></div>`).join("")}</div>
       <h2>Envios na fila de reenvio</h2>${ob.length ? `<table><tr><th>#</th><th>Serviço</th><th>Tentativas</th><th>Situação</th></tr>${ob.map((o) => { const e = o.last_error ? JSON.parse(o.last_error) : null; return `<tr><td>${o.id}</td><td>${esc(o.service)} · ${esc(o.action)}</td><td>${o.attempts}</td><td>${o.done ? '<span class="pill ok">enviado</span>' : e ? `<span class="pill bad">${esc(e.motivo)}</span> ${esc(e.como_resolver)}` : '<span class="pill">aguardando</span>'}</td></tr>`; }).join("")}</table><div class="row" style="margin-top:10px"><button class="btn" id="obr">Tentar enviar agora</button></div>` : `<div class="empty">Nada pendente.</div>`}`;
@@ -243,6 +292,7 @@ const VIEWS = {
       card.querySelector(".sv").onclick = async () => { await call("save_connection", { values: values() }); toast("Salvo."); render(); };
       card.querySelector(".ts").onclick = async () => { await call("save_connection", { values: values() }); toast("Testando…"); const r = await call("test_connection", { id: card.dataset.s }); toast(r.mensagem, r.estado !== "conectado"); render(); };
     });
+    document.querySelectorAll("[data-url]").forEach((b) => b.onclick = async () => { await call("open_url", { url: b.dataset.url }); toast("Abrindo no navegador. Crie a chave, copie e cole aqui."); });
     if ($("#obr")) $("#obr").onclick = async () => { await call("outbox_retry_now"); render(); };
   },
 
@@ -281,9 +331,14 @@ const VIEWS = {
 
 async function fotoList() {
   const d = await call("photo_projects");
-  $("#flist").innerHTML = d.projetos.map((p) => `<div class="card ep" data-fid="${p.id}"><div><div class="t">${esc(p.title)}</div><div class="m">#${p.id} · ${esc(p.folder)} · ${fmtDate(p.created_at)}</div>${p.erro ? errBox(p.erro) : ""}</div>
-    <div><div class="m" style="margin-bottom:6px">${esc(p.stage || "")}</div><div class="bar"><i style="width:${Math.round((p.progress || 0) * 100)}%"></i></div></div><div>${pill(p.status)}</div></div>`).join("") || `<div class="empty">Nenhum vídeo de fotos ainda.</div>`;
-  document.querySelectorAll("[data-fid]").forEach((el) => el.onclick = () => { ui.foto = +el.dataset.fid; ui.fsig = null; $("#main").innerHTML = ""; render(); });
+  const html = d.projetos.map((p) => `<div class="card ep" data-fid="${p.id}"><div><div class="t">${esc(p.title)}</div><div class="m">#${p.id} · ${esc(p.folder)} · ${fmtDate(p.created_at)}</div>${p.erro ? errBox(p.erro) : ""}</div>
+    <div><div class="m" style="margin-bottom:6px">${esc(p.stage || "")}</div><div class="bar"><i style="width:${Math.round((p.progress || 0) * 100)}%"></i></div></div>
+    <div class="row">${p.status === "erro" || p.travado ? `<button class="btn sm" data-fretry="${p.id}" ${p.travado ? 'title="Nada está rodando para este projeto: refaz o que faltou"' : ""}>Tentar de novo</button>` : ""}<button class="btn sm" data-flog="${p.id}" title="Ver o log deste projeto">Log${p.erros_log ? ` <span class="nbadge">${p.erros_log}</span>` : ""}</button>${pill(p.status)}</div></div>`).join("") || `<div class="empty">Nenhum vídeo de fotos ainda.</div>`;
+  if ($("#flist").dataset.h === html) return; $("#flist").dataset.h = html;
+  $("#flist").innerHTML = html;
+  document.querySelectorAll("[data-fid]").forEach((el) => el.onclick = (ev) => { if (ev.target.closest("button,details")) return; ui.foto = +el.dataset.fid; ui.fsig = null; $("#main").innerHTML = ""; render(); });
+  document.querySelectorAll("[data-flog]").forEach((b) => b.onclick = () => openLog("fotos", +b.dataset.flog));
+  document.querySelectorAll("[data-fretry]").forEach((b) => b.onclick = async () => { const n = await call("photo_retry", { id: +b.dataset.fretry }); toast(n ? "De volta à fila." : "Nada para repetir."); });
 }
 
 async function fotoDetail(id) {
@@ -298,7 +353,8 @@ async function fotoDetail(id) {
   const playing = {}; document.querySelectorAll("#fdet video").forEach((v) => playing[v.dataset.i] = v.currentTime);
   $("#main").innerHTML = `<div id="fdet"><div class="row"><button class="btn sm" id="fback">← Vídeos de fotos</button></div>
     <div class="row" style="margin-top:12px"><div><h1>${esc(p.titulo_video || p.titulo)}</h1><div class="sub" style="margin:0">${pill(p.status)} &nbsp;${esc(p.etapa || "")} · ${p.fotos_total} fotos · plano: ${esc(p.motor || "—")}${p.musica ? ` · trilha ${p.musica.bpm} BPM` : ""} · custo ${usd(p.custo.total_usd)}</div></div>
-      <div class="spacer"></div>${p.status === "erro" ? `<button class="btn" id="fretry">Tentar de novo</button>` : ""}</div>
+      <div class="spacer"></div><button class="btn" id="flog">Ver log</button>${p.status === "erro" || p.travado ? `<button class="btn" id="fretry">Tentar de novo</button>` : ""}</div>
+    ${p.travado ? `<div class="warn">Este projeto está parado: nada está rodando para ele (o app pode ter sido fechado no meio do render). Clique em <b>Tentar de novo</b>.</div>` : ""}
     ${p.erro ? errBox(p.erro) : ""}${(p.avisos || []).map((a) => `<div class="warn">${esc(a)}</div>`).join("")}
     <div class="bar" style="margin:12px 0 18px"><i style="width:${Math.round((p.progresso || 0) * 100)}%"></i></div>
     ${p.justificativa ? `<div class="card why" style="margin-bottom:16px"><b style="color:var(--text)">Por que a IA montou assim:</b> ${esc(p.justificativa)}${p.ajuste ? `<br><b style="color:var(--text)">Último ajuste:</b> ${esc(p.ajuste)}` : ""}</div>` : ""}
@@ -309,11 +365,18 @@ async function fotoDetail(id) {
         <div class="why">${esc(v.spec.justificativa || "")}</div>${v.erro ? errBox(v.erro) : ""}
         ${locked ? "" : `<div class="row"><button class="btn ok sm" data-fap="${i}" ${v.status === "pronta" ? "" : "disabled"}>Aprovar V${v.idx} e renderizar</button></div>`}</div></div>`).join("")}</div>
     ${locked ? "" : `<div class="card row" style="margin-top:16px"><input id="fadj" placeholder="Ajuste rápido: mais rápido, mais calmo, sem texto, outra LUT, título: …, duração: 60"><button class="btn" id="fadjb">Ajustar</button><button class="btn bad" id="frej">Reprovar</button></div>`}
+    ${destCard(p, locked)}
     ${p.finais.length ? `<h2>Finais</h2><div class="meta">${p.finais.map((f) => `<span><a href="#" data-rev="${esc(f.arquivo)}" style="color:var(--ok)">${esc(f.formato)} · ${fmtT(f.duracao)} — abrir no Finder</a></span>`).join("")}</div>` : ""}
     <h2>Roteiro (${p.cenas.length} cenas)</h2><div class="scenes">${p.cenas.map((c) => `<div class="scene"><img src="${c.thumb}" loading="lazy"><div><b>${c.n}</b> · ${fmtT(c.inicio)}–${fmtT(c.fim)}<br>${esc(c.movimento)} · ${esc(c.transicao)}${c.texto ? `<br><i>“${esc(c.texto)}”</i>` : ""}${(c.ajustes || []).length ? `<br><span style="color:var(--ok)">✓ ${esc(c.ajustes.join(" · "))}</span>` : ""}</div></div>`).join("")}</div>
     ${(p.duplicadas || []).length ? `<h2>Fotos repetidas removidas</h2><div class="card why">${p.duplicadas.map((d) => `<div>Mantida <b style="color:var(--text)">${esc(d.mantida)}</b> — removidas: ${d.removidas.map((r) => `${esc(r.nome)} (${esc(r.motivo)})`).join(", ")}</div>`).join("")}</div>` : ""}</div>`;
   document.querySelectorAll("#fdet video").forEach((v) => { if (playing[v.dataset.i]) v.currentTime = playing[v.dataset.i]; });
   $("#fback").onclick = () => { ui.foto = null; ui.fvar = null; $("#main").innerHTML = ""; render(); };
+  $("#flog").onclick = () => openLog("fotos", id);
+  document.querySelectorAll("[data-url2]").forEach((a) => a.onclick = (e) => { e.preventDefault(); call("open_url", { url: a.dataset.url2 }); });
+  if ($("#dsave")) {
+    $("#dpick").onclick = async () => { const r = await call("pick", { kind: "folder" }); if (r) $("#d_saida").value = r; else toast("Cole o caminho no campo (o seletor só abre no app do Mac)."); };
+    $("#dsave").onclick = async () => { await call("photo_set_destination", { id, pasta_saida: $("#d_saida").value, enviar_drive: $("#d_drive").checked, pasta_drive: $("#d_pdrive").value }); toast("Destino salvo."); ui.fsig = null; render(); };
+  }
   if ($("#fretry")) $("#fretry").onclick = async () => { const n = await call("photo_retry", { id }); toast(n ? "De volta à fila." : "Nada para repetir."); };
   document.querySelectorAll("[data-fap]").forEach((b) => b.onclick = async () => { await call("photo_approve", { id, var: +b.dataset.fap }); toast("Aprovado — render final na fila."); ui.fsig = null; render(); });
   document.querySelectorAll("[data-rev]").forEach((a) => a.onclick = (e) => { e.preventDefault(); call("reveal", { path: a.dataset.rev }); });
@@ -323,6 +386,24 @@ async function fotoDetail(id) {
     $("#frej").onclick = async () => { const n = prompt("Motivo (opcional):", ""); if (n === null) return; await call("photo_reject", { id, note: n }); ui.fsig = null; render(); };
   }
 }
+
+function destCard(p, locked) {
+  const d = p.destino || {}; const o = p.opcoes || {}; const dr = d.drive;
+  const drv = !d.enviar_drive ? "não enviar" : !d.drive_configurado ? `<span style="color:var(--acc)">Drive não configurado (Conexões)</span>` : `Meu Drive/${esc(d.drive_pasta)}`;
+  const st = dr ? `<div class="${dr.estado === "erro" ? "warn" : "why"}" style="margin-top:6px">${esc(dr.mensagem)}${(dr.links || []).length ? `<br>${dr.links.map((l) => /^https?:/.test(l) ? `<a href="#" data-url2="${esc(l)}" style="color:var(--ok)">abrir no Drive</a>` : `<a href="#" data-rev="${esc(l)}" style="color:var(--ok)">${esc(l)}</a>`).join("<br>")}` : ""}</div>` : "";
+  if (locked) return `<div class="card" style="margin-top:16px"><b>Destino</b><div class="why" style="margin-top:6px">Computador: <code>${esc(d.computador)}</code><br>Google Drive: ${drv}</div>${st}</div>`;
+  return `<div class="card" style="margin-top:16px"><b>Onde salvar o vídeo final</b><div class="form" style="margin-top:10px">
+    <div class="full"><label>No computador (vazio = pasta do kit) — hoje: <code>${esc(d.computador)}</code></label><div class="row" style="flex-wrap:nowrap"><input id="d_saida" value="${esc(o.pasta_saida || "")}"><button class="btn sm" id="dpick">…</button></div></div>
+    <div><label>&nbsp;</label><span class="chk"><input id="d_drive" type="checkbox" ${d.enviar_drive ? "checked" : ""}> Enviar para o Google Drive</span></div>
+    <div><label>Pasta no Drive — hoje: <code>${esc(d.drive_pasta)}</code></label><input id="d_pdrive" value="${esc(o.pasta_drive || "")}" placeholder="vazio = CorteX9/AAAA-MM-DD/cliente/projeto"></div>
+    <div class="full row">${d.drive_configurado ? "" : `<span class="why" style="color:var(--acc)">Google Drive não configurado: configure em Conexões para o envio funcionar.</span>`}<div class="spacer"></div><button class="btn sm" id="dsave">Salvar destino</button></div></div>${st}</div>`;
+}
+
+function copyText(txt) {
+  try { if (navigator.clipboard) { navigator.clipboard.writeText(txt).catch(() => fallbackCopy(txt)); return; } } catch { /* segue */ }
+  fallbackCopy(txt);
+}
+function fallbackCopy(txt) { const t = document.createElement("textarea"); t.value = txt; document.body.appendChild(t); t.select(); try { document.execCommand("copy"); } catch { /* nada */ } t.remove(); }
 
 function cutCard(el, c) {
   const ratio = { "9:16": "", "1:1": "r11", "16:9": "r169", "4:5": "r45" };

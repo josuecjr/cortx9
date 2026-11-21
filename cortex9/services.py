@@ -10,7 +10,7 @@ from pathlib import Path
 
 import requests
 
-from . import db, secrets
+from . import db, eventlog, secrets
 from .errors import explain
 
 log = logging.getLogger("cortex9.services")
@@ -18,24 +18,29 @@ HTTP_TIMEOUT = 60
 
 # Campos: (id, rótulo, secreto?)
 SERVICES = [
-    {"id": "claude", "nome": "Claude API", "uso": "IA diretora, escolha dos cortes e revisão das legendas.",
+    {"id": "claude", "links": [("Gerar chave da Claude API", "https://console.anthropic.com/settings/keys")],
+      "nome": "Claude API", "uso": "IA diretora, escolha dos cortes e revisão das legendas.",
      "campos": [("anthropic_api_key", "Chave da API (sk-ant-…)", True), ("claude_modelo", "Modelo", False)]},
-    {"id": "openai", "nome": "ChatGPT (OpenAI)", "uso": "Reserva da IA diretora se o Claude falhar.",
+    {"id": "openai", "links": [("Gerar chave da OpenAI", "https://platform.openai.com/api-keys")],
+      "nome": "ChatGPT (OpenAI)", "uso": "Reserva da IA diretora se o Claude falhar.",
      "campos": [("openai_api_key", "Chave da API (sk-…)", True), ("openai_modelo", "Modelo", False)]},
-    {"id": "magnific", "nome": "Magnific (Freepik API)", "uso": "Upscale leve e ilustração de capa, só em alguns cortes.",
-     "campos": [("magnific_api_key", "Chave da API Freepik/Magnific", True)]},
-    {"id": "elevenlabs", "nome": "ElevenLabs", "uso": "Isolamento e reforço de voz quando o áudio está ruim.",
+    {"id": "elevenlabs", "links": [("Gerar chave da ElevenLabs", "https://elevenlabs.io/app/settings/api-keys")],
+      "nome": "ElevenLabs", "uso": "Isolamento e reforço de voz quando o áudio está ruim.",
      "campos": [("elevenlabs_api_key", "Chave da API (xi-api-key)", True)]},
-    {"id": "epidemic", "nome": "Epidemic Sound", "uso": "Trilhas de fundo escolhidas pelo clima do corte.",
+    {"id": "epidemic", "links": [("Pedir acesso à Partner API", "https://www.epidemicsound.com/partner-api/")],
+      "nome": "Epidemic Sound", "uso": "Trilhas de fundo escolhidas pelo clima do corte.",
      "campos": [("epidemic_token", "Token de acesso (Partner API)", True), ("epidemic_base", "URL da API", False)]},
-    {"id": "gdrive", "nome": "Google Drive", "uso": "Ler o kit do projeto e arquivar finais em CorteX9/data/cliente/projeto.",
+    {"id": "gdrive", "links": [("Baixar o Google Drive para desktop", "https://www.google.com/drive/download/"), ("Criar conta de serviço (links)", "https://console.cloud.google.com/iam-admin/serviceaccounts")],
+      "nome": "Google Drive", "uso": "Ler o kit do projeto e arquivar finais em CorteX9/data/cliente/projeto.",
      "campos": [("drive_pasta_local", "Pasta do Google Drive no Mac", False),
                 ("gdrive_service_account", "JSON da conta de serviço (opcional, gera links)", True),
                 ("drive_pasta_id", "ID da pasta CorteX9 no Drive compartilhado (opcional)", False)]},
-    {"id": "base44", "nome": "Base44 (API)", "uso": "Ficha técnica de cada corte aprovado, link do cliente e custo por episódio.",
+    {"id": "base44", "links": [("Abrir o Base44 para pegar a chave", "https://app.base44.com/")],
+      "nome": "Base44 (API)", "uso": "Ficha técnica de cada corte aprovado, link do cliente e custo por episódio.",
      "campos": [("base44_api_key", "Chave da API do app", True), ("base44_app_id", "ID do app", False),
                 ("base44_app_url", "URL pública do app", False)]},
-    {"id": "celular", "nome": "Notificação no celular (ntfy)", "uso": "Avisa no celular quando as prévias ficam prontas.",
+    {"id": "celular", "links": [("Instalar o app ntfy no celular", "https://ntfy.sh/")],
+      "nome": "Notificação no celular (ntfy)", "uso": "Avisa no celular quando as prévias ficam prontas.",
      "campos": [("ntfy_topico", "Tópico ntfy (app ntfy no iPhone/Android)", True)]},
 ]
 
@@ -46,8 +51,11 @@ DEFAULTS = {"claude_modelo": "claude-opus-5-5", "openai_modelo": "gpt-5",
 PRICES = {
     "claude:input_tokens": 4.00 / 1e6, "claude:output_tokens": 20.00 / 1e6,
     "openai:input_tokens": 1.25 / 1e6, "openai:output_tokens": 10.00 / 1e6,
-    "elevenlabs:segundos": 0.0, "magnific:creditos": 0.0, "epidemic:downloads": 0.0,
+    "elevenlabs:segundos": 0.0, "epidemic:downloads": 0.0,
 }
+
+
+LINK_URLS = {u for s in SERVICES for _a, u in s.get("links", [])}
 
 
 def field(key):
@@ -129,7 +137,8 @@ def status_all():
                 fields.append({"key": k, "label": lbl, "secret": True, "value": "••••••" if secrets.has(k) else ""})
             else:
                 fields.append({"key": k, "label": lbl, "secret": False, "value": get(k) or ""})
-        out.append({**{k: s[k] for k in ("id", "nome", "uso")}, **state, "campos": fields})
+        out.append({**{k: s[k] for k in ("id", "nome", "uso")}, **state, "campos": fields,
+                    "links": [{"rotulo": a, "url": b} for a, b in s.get("links", [])]})
     return {"servicos": out, "cofre": secrets.storage_name()}
 
 
@@ -164,12 +173,6 @@ def _t_openai():
     r = requests.get("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {_need('openai_api_key', 'OpenAI')}"}, timeout=20)
     r.raise_for_status()
     return "OK — reserva pronta."
-
-
-def _t_magnific():
-    r = requests.get("https://api.freepik.com/v1/ai/image-upscaler", headers={"x-freepik-api-key": _need("magnific_api_key", "Magnific")}, timeout=20)
-    r.raise_for_status()
-    return "OK — chave aceita."
 
 
 def _t_eleven():
@@ -220,7 +223,7 @@ def _t_ntfy():
     return "OK — notificação de teste enviada."
 
 
-TESTS = {"claude": _t_claude, "openai": _t_openai, "magnific": _t_magnific, "elevenlabs": _t_eleven,
+TESTS = {"claude": _t_claude, "openai": _t_openai, "elevenlabs": _t_eleven,
          "epidemic": _t_epidemic, "gdrive": _t_drive, "base44": _t_base44, "celular": _t_ntfy}
 
 
@@ -268,29 +271,6 @@ def epidemic_track(mood: str, dest_dir: Path, episode_id=None):
     return dest
 
 
-# ---------------------------------------------------------------- Magnific (Freepik API)
-def magnific_upscale(img: Path, out: Path, episode_id=None, prompt=""):
-    import base64
-    key = _need("magnific_api_key", "Magnific")
-    h = {"x-freepik-api-key": key, "Content-Type": "application/json"}
-    body = {"image": base64.b64encode(img.read_bytes()).decode(), "scale_factor": "2x", "optimized_for": "standard",
-            "creativity": 1, "hdr": 1, "resemblance": 2, "prompt": prompt[:300]}
-    r = requests.post("https://api.freepik.com/v1/ai/image-upscaler", json=body, headers=h, timeout=60)
-    r.raise_for_status()
-    task = r.json()["data"]["task_id"]
-    for _ in range(90):
-        time.sleep(4)
-        s = requests.get(f"https://api.freepik.com/v1/ai/image-upscaler/{task}", headers=h, timeout=30).json()["data"]
-        if s.get("status") == "COMPLETED":
-            url = s["generated"][0]
-            out.write_bytes(requests.get(url, timeout=120).content)
-            add_cost(episode_id, "magnific", 1, "creditos")
-            return out
-        if s.get("status") == "FAILED":
-            raise RuntimeError("Magnific falhou no upscale")
-    raise TimeoutError("Magnific timed out")
-
-
 # ---------------------------------------------------------------- Google Drive
 def _drive_token():
     from google.auth.transport.requests import Request
@@ -315,12 +295,16 @@ def _drive_folder(tok, name, parent):
 
 
 def drive_archive(payload):
-    """payload: files[], date, client, project. Copia para a pasta local e/ou sobe pela API. Retorna links."""
-    sub = [payload["data"], payload["cliente"], payload["projeto"]]
+    """payload: arquivos[], data, cliente, projeto, destino (opcional, relativo ao Meu Drive).
+    Copia para a pasta do Google Drive para desktop e/ou sobe pela API. Retorna links."""
+    if payload.get("destino"):
+        sub = [x for x in str(payload["destino"]).strip("/").split("/") if x]
+    else:
+        sub = ["CorteX9", payload["data"], payload["cliente"], payload["projeto"]]
     result = {"local": [], "links": []}
     local = get("drive_pasta_local")
     if local:
-        dest = Path(local, "CorteX9", *sub)
+        dest = Path(local, *sub)
         dest.mkdir(parents=True, exist_ok=True)
         for f in payload["arquivos"]:
             target = dest / Path(f).name
@@ -330,7 +314,7 @@ def drive_archive(payload):
     if secrets.has("gdrive_service_account") and get("drive_pasta_id"):
         tok = _drive_token()
         parent = get("drive_pasta_id")
-        for s in sub:
+        for s in (sub[1:] if sub and sub[0] == "CorteX9" else sub):  # drive_pasta_id já é a pasta CorteX9
             parent = _drive_folder(tok, s, parent)
         h = {"Authorization": f"Bearer {tok}"}
         for f in payload["arquivos"]:
@@ -347,6 +331,10 @@ def drive_archive(payload):
     if payload.get("cut_id"):
         link = (result["links"] or [None])[0] or (result["local"] or [""])[0]
         db.update("cuts", payload["cut_id"], drive_link=link)
+    if payload.get("photo_id"):
+        from . import photos
+        where = "/".join(sub)
+        photos._drive_state(payload["photo_id"], "enviado", f"No Google Drive: {where}", result["links"] or result["local"])
     return result
 
 
@@ -419,14 +407,34 @@ def outbox_tick():
     rows = db.q("SELECT * FROM outbox WHERE done=0 AND next_try_at<=? ORDER BY id LIMIT 5", db.now())
     for r in rows:
         try:
-            HANDLERS[(r["service"], r["action"])](r["payload"])
+            res = HANDLERS[(r["service"], r["action"])](r["payload"])
             db.update("outbox", r["id"], done=1, last_error=None)
+            kind, ref = _outbox_ref(r["payload"])
+            eventlog.info(f"Envio {r['service']} ({r['action']}) concluído" + (f": {', '.join(res.get('links') or res.get('local') or [])}" if isinstance(res, dict) and r["service"] == "gdrive" else ""),
+                          kind=kind, ref=ref, step=f"envio {r['service']}")
         except Exception as e:  # noqa: BLE001
             err = explain(f"Envio {r['service']}", e)
             att = r["attempts"] + 1
             delay = min(3600, 30 * (2 ** min(att, 7)))
             db.update("outbox", r["id"], attempts=att, last_error=json.dumps(err.as_dict(), ensure_ascii=False), next_try_at=db.now() + delay)
-            log.warning("Envio %s falhou (tentativa %s): %s", r["service"], att, err.reason)
+            kind, ref = _outbox_ref(r["payload"])
+            eventlog.warn(f"Envio {r['service']} falhou (tentativa {att}, nova tentativa em {delay // 60:.0f} min): {err.reason} → {err.fix}",
+                          kind=kind, ref=ref, step=f"envio {r['service']}", detail=err.detail)
+            if r["service"] == "gdrive" and (r["payload"] or {}).get("photo_id"):
+                from . import photos
+                photos._drive_state(r["payload"]["photo_id"], "erro", f"Drive: {err.reason} {err.fix} (o app tenta de novo sozinho)")
+
+
+def _outbox_ref(payload):
+    payload = payload or {}
+    if payload.get("photo_id"):
+        return "fotos", payload["photo_id"]
+    if payload.get("episode_id"):
+        return "episodio", payload["episode_id"]
+    if payload.get("cut_id"):
+        c = db.one("SELECT episode_id FROM cuts WHERE id=?", payload["cut_id"])
+        return "episodio", (c or {}).get("episode_id")
+    return "app", None
 
 
 def outbox_loop(stop: threading.Event):

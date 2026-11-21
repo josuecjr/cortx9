@@ -8,10 +8,15 @@ class StepError(Exception):
         self.step, self.reason, self.fix, self.detail = step, reason, fix, detail
 
     def as_dict(self):
-        return {"etapa": self.step, "motivo": self.reason, "como_resolver": self.fix, "detalhe": self.detail[-1500:]}
+        return {"etapa": self.step, "motivo": self.reason, "como_resolver": self.fix, "detalhe": self.detail[-4000:]}
 
 
 _RULES = [
+    (r"No such filter|Filter not found|Unknown encoder|Encoder not found",
+     "O FFmpeg instalado não tem um recurso que o CorteX9 usa.",
+     "Rode o instalador novo do CorteX9 (ele instala o FFmpeg completo). Veja o comando e o recurso que faltou na aba Log."),
+    (r"travou e foi interrompido|passou de .* s e foi interrompido", "O render travou e foi interrompido.",
+     "Clique em Tentar de novo. Se repetir, reinicie o Mac e exporte o log (aba Log) para o suporte."),
     (r"chave (do|da) .* ausente|chave ausente|ID do app .* ausente|não configurado", "Conexão não configurada.",
      "Abra Conexões e preencha a chave. Enquanto isso, o app segue com o que roda local."),
     (r"No such file or directory|does not exist|FileNotFound", "Arquivo não encontrado.",

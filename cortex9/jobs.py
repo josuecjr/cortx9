@@ -3,7 +3,7 @@ import json
 import logging
 import threading
 
-from . import db, pipeline
+from . import db, eventlog, pipeline
 from .errors import explain
 
 log = logging.getLogger("cortex9.jobs")
@@ -46,10 +46,27 @@ def _run(j):
         raise ValueError(f"job desconhecido {k}")
 
 
+STEPS = {"analyze": "análise do episódio", "preview": "prévia", "final": "render final", "adjust": "ajuste rápido",
+         "photo_analyze": "análise das fotos", "photo_preview": "prévia do vídeo de fotos", "photo_final": "render final do vídeo de fotos",
+         "photo_adjust": "ajuste do vídeo de fotos"}
+
+
+def _ref(j):
+    if j["kind"].startswith("photo_"):
+        return "fotos", (j["payload"] or {}).get("project_id")
+    return "episodio", j["episode_id"]
+
+
+def _var_label(j):
+    if j["kind"] == "photo_preview":
+        return f" · V{(j['payload'] or {}).get('var', 0) + 1}"
+    if j["kind"] == "preview" and j.get("variation_id"):
+        return f" · variação {j['variation_id']}"
+    return ""
+
+
 def _fail(j, exc):
-    step = {"analyze": "análise do episódio", "preview": "prévia", "final": "render final", "adjust": "ajuste rápido",
-            "photo_analyze": "análise das fotos", "photo_preview": "prévia do vídeo de fotos", "photo_final": "render final do vídeo de fotos",
-            "photo_adjust": "ajuste do vídeo de fotos"}[j["kind"]]
+    step = STEPS[j["kind"]]
     err = explain(step, exc).as_dict()
     payload = json.dumps(err, ensure_ascii=False)
     db.update("jobs", j["id"], status="failed", error=payload, updated_at=db.now())
@@ -58,7 +75,7 @@ def _fail(j, exc):
         if j["kind"] != "photo_preview":  # prévia já marca a variação com erro
             db.update("photo_projects", pid, status="erro", error=payload, stage=f"Erro: {err['motivo']}")
         return
-    log.error("Job %s (%s) falhou: %s — %s", j["id"], j["kind"], err["motivo"], err["detalhe"][-300:])
+    log.info("Job %s (%s) falhou: %s", j["id"], j["kind"], err["motivo"])
     if j["kind"] == "analyze":
         db.update("episodes", j["episode_id"], status="erro", error=payload, stage=f"Erro: {err['motivo']}")
     elif j["kind"] == "preview":
@@ -77,15 +94,24 @@ def worker(lane, stop):
             _wake.wait(2)
             _wake.clear()
             continue
-        try:
-            _run(j)
-            db.update("jobs", j["id"], status="done", error=None, updated_at=db.now())
-        except Exception as e:  # noqa: BLE001
-            log.exception("job %s", j["id"])
+        kind, ref = _ref(j)
+        with eventlog.context(kind, ref, STEPS.get(j["kind"], j["kind"])):
+            eventlog.info(f"Começou: {STEPS.get(j['kind'], j['kind'])}" + (f" (tentativa {j['attempts'] + 1})" if j["attempts"] else "")
+                          + _var_label(j))
             try:
-                _fail(j, e)
-            except Exception:  # noqa: BLE001
-                log.exception("falha registrando erro")
+                _run(j)
+                db.update("jobs", j["id"], status="done", error=None, updated_at=db.now())
+                eventlog.info(f"Terminou: {STEPS.get(j['kind'], j['kind'])}{_var_label(j)}")
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                err = explain(STEPS.get(j["kind"], j["kind"]), e)
+                eventlog.error(f"Falhou{_var_label(j)}: {err.reason} → {err.fix}",
+                               detail=f"{err.detail}\n\n--- traceback ---\n{traceback.format_exc()}")
+                log.debug("job %s", j["id"], exc_info=True)
+                try:
+                    _fail(j, e)
+                except Exception:  # noqa: BLE001
+                    log.exception("falha registrando erro")
 
 
 def start(stop):
